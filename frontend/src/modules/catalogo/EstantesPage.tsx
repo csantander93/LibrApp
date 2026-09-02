@@ -5,6 +5,8 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { Modal } from "@/shared/components/ui/Modal";
+import { useToast } from "@/shared/components/ui/Toast";
+import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import type { Estante, Zona } from "@/shared/types";
 import {
   listarEstantes, listarZonas, crearEstante, actualizarEstante, eliminarEstante,
@@ -13,6 +15,8 @@ import {
 
 export function EstantesPage() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirmar = useConfirm();
   const { data: estantes, isLoading } = useQuery({ queryKey: ["estantes"], queryFn: listarEstantes });
   const { data: zonas = [] } = useQuery({ queryKey: ["zonas"], queryFn: listarZonas });
 
@@ -21,24 +25,34 @@ export function EstantesPage() {
 
   const eliminar = useMutation({
     mutationFn: eliminarEstante,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["estantes"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success("Estante eliminado");
+    },
     onError: (err: any) => {
       // RN-08: el backend rechaza si el estante tiene libros asignados.
-      window.alert(err?.response?.data?.detail ?? "No se pudo eliminar el estante");
+      toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el estante");
     },
   });
 
   const nombreZona = (id: string | null) => zonas.find((z) => z.id === id)?.nombre ?? "—";
 
-  function confirmarEliminar(e: Estante) {
+  async function confirmarEliminar(e: Estante) {
     if (e.total_libros > 0) {
-      window.alert(
+      toast.error(
         `El estante "${e.codigo}" tiene ${e.total_libros} libro(s) asignado(s). ` +
         "Reasignalos o dejalos 'Sin ubicar' antes de eliminarlo.",
       );
       return;
     }
-    if (window.confirm(`¿Eliminar el estante "${e.codigo}"?`)) eliminar.mutate(e.id);
+    const ok = await confirmar({
+      mensaje: (
+        <>
+          ¿Eliminar el estante <strong className="font-semibold text-stone-800">“{e.codigo}”</strong>?
+        </>
+      ),
+    });
+    if (ok) eliminar.mutate(e.id);
   }
 
   return (
@@ -117,6 +131,7 @@ function EstanteFormModal({
   onClose, estante, zonas,
 }: { onClose: () => void; estante: Estante | null; zonas: Zona[] }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [form, setForm] = useState<EstanteInput>({
     codigo: estante?.codigo ?? "",
     etiqueta: estante?.etiqueta ?? "",
@@ -135,6 +150,7 @@ function EstanteFormModal({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success(estante ? "Estante actualizado" : "Estante creado");
       onClose();
     },
     onError: (err: any) => {

@@ -4,7 +4,8 @@ import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
-import { ConfirmDialog } from "@/shared/components/ui/ConfirmDialog";
+import { useToast } from "@/shared/components/ui/Toast";
+import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import type { Libro } from "@/shared/types";
 import { listarLibros, listarColecciones, listarEstantes, eliminarLibro } from "./api";
 import { LibroFormModal } from "./LibroFormModal";
@@ -19,6 +20,8 @@ function formatearPrecio(precio: string | null): string {
 
 export function CatalogoPage() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirmar = useConfirm();
   const [q, setQ] = useState("");
   const [coleccionId, setColeccionId] = useState("");
   const [estanteId, setEstanteId] = useState("");
@@ -26,7 +29,6 @@ export function CatalogoPage() {
   const [pagina, setPagina] = useState(1);
   const [modalAbierto, setModalAbierto] = useState(false);
   const [libroEdit, setLibroEdit] = useState<Libro | null>(null);
-  const [libroEliminar, setLibroEliminar] = useState<Libro | null>(null);
 
   const filtros = {
     q: q.trim().length >= 2 ? q.trim() : undefined,
@@ -48,8 +50,10 @@ export function CatalogoPage() {
       qc.invalidateQueries({ queryKey: ["libros"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["estantes"] });
-      setLibroEliminar(null);
+      toast.success("Libro eliminado");
     },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el libro"),
   });
 
   const total = libros?.length ?? 0;
@@ -68,8 +72,16 @@ export function CatalogoPage() {
     setLibroEdit(libro);
     setModalAbierto(true);
   }
-  function confirmarEliminar(libro: Libro) {
-    setLibroEliminar(libro);
+  async function confirmarEliminar(libro: Libro) {
+    const ok = await confirmar({
+      mensaje: (
+        <>
+          ¿Eliminar <strong className="font-semibold text-stone-800">“{libro.titulo}”</strong>?
+          Esta acción no se puede deshacer.
+        </>
+      ),
+    });
+    if (ok) eliminar.mutate(libro.id);
   }
 
   return (
@@ -206,23 +218,6 @@ export function CatalogoPage() {
         libro={libroEdit}
         colecciones={colecciones}
         estantes={estantes}
-      />
-
-      <ConfirmDialog
-        abierto={libroEliminar !== null}
-        onClose={() => setLibroEliminar(null)}
-        onConfirm={() => libroEliminar && eliminar.mutate(libroEliminar.id)}
-        titulo="Eliminar libro"
-        cargando={eliminar.isPending}
-        mensaje={
-          <>
-            ¿Seguro que querés eliminar{" "}
-            <strong className="font-semibold text-stone-900">
-              «{libroEliminar?.titulo}»
-            </strong>
-            ? Esta acción no se puede deshacer.
-          </>
-        }
       />
     </div>
   );
