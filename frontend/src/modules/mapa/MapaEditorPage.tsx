@@ -7,6 +7,8 @@ import {
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
+import { useToast } from "@/shared/components/ui/Toast";
+import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import { cn, COLORES_ESTANTE, colorEstante } from "@/lib/utils";
 import type { Estante, Anotacion, AnotacionTipo } from "@/shared/types";
 import {
@@ -51,6 +53,8 @@ function ColorPicker({ value, onChange }: { value: string | null; onChange: (c: 
 
 export function MapaEditorPage() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirmar = useConfirm();
   const { data: estantesServer, isLoading } = useQuery({ queryKey: ["estantes"], queryFn: listarEstantes });
   const { data: anotServer } = useQuery({ queryKey: ["anotaciones"], queryFn: listarAnotaciones });
   const { data: zonas = [] } = useQuery({ queryKey: ["zonas"], queryFn: listarZonas });
@@ -161,7 +165,9 @@ export function MapaEditorPage() {
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["estantes"] });
       qc.invalidateQueries({ queryKey: ["anotaciones"] });
+      toast.success("Cambios guardados");
     },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudieron guardar los cambios"),
   });
 
   // ── Alta de estante ─────────────────────────────────────────────────────────
@@ -172,8 +178,9 @@ export function MapaEditorPage() {
       setSelEstId(nuevo.id);
       setSelAnotId(null);
       qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success("Estante creado");
     },
-    onError: (err: any) => window.alert(err?.response?.data?.detail ?? "No se pudo crear el estante"),
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo crear el estante"),
   });
 
   const eliminarEst = useMutation({
@@ -182,8 +189,9 @@ export function MapaEditorPage() {
       setLocalEst((prev) => prev.filter((e) => e.id !== id));
       setSelEstId(null);
       qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success("Estante eliminado");
     },
-    onError: (err: any) => window.alert(err?.response?.data?.detail ?? "No se pudo eliminar"),
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo eliminar"),
   });
 
   // ── Alta / baja de anotaciones ──────────────────────────────────────────────
@@ -201,6 +209,7 @@ export function MapaEditorPage() {
       setSelEstId(null);
       qc.invalidateQueries({ queryKey: ["anotaciones"] });
     },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo crear la anotación"),
   });
 
   const eliminarAnot = useMutation({
@@ -209,7 +218,9 @@ export function MapaEditorPage() {
       setLocalAnot((prev) => prev.filter((a) => a.id !== id));
       setSelAnotId(null);
       qc.invalidateQueries({ queryKey: ["anotaciones"] });
+      toast.success("Anotación eliminada");
     },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo eliminar la anotación"),
   });
 
   // ── Ediciones locales (marcan dirty) ────────────────────────────────────────
@@ -241,16 +252,23 @@ export function MapaEditorPage() {
     });
   }
 
-  function eliminarEstanteSel() {
+  async function eliminarEstanteSel() {
     if (!selEstante) return;
     if (selEstante.total_libros > 0) {
-      window.alert(
+      toast.error(
         `El estante "${selEstante.codigo}" tiene ${selEstante.total_libros} libro(s). ` +
         "Reasignalos antes de eliminarlo (RN-08).",
       );
       return;
     }
-    if (window.confirm(`¿Eliminar el estante "${selEstante.codigo}"?`)) eliminarEst.mutate(selEstante.id);
+    const ok = await confirmar({
+      mensaje: (
+        <>
+          ¿Eliminar el estante <strong className="font-semibold text-stone-800">“{selEstante.codigo}”</strong>?
+        </>
+      ),
+    });
+    if (ok) eliminarEst.mutate(selEstante.id);
   }
 
   return (
@@ -424,7 +442,17 @@ export function MapaEditorPage() {
                 Arrastrá para mover; esquina redimensiona.
               </p>
 
-              <Button variant="danger" className="mt-3 w-full px-2 py-1 text-xs" onClick={() => eliminarAnot.mutate(selAnot.id)}>
+              <Button
+                variant="danger"
+                className="mt-3 w-full px-2 py-1 text-xs"
+                onClick={async () => {
+                  const ok = await confirmar({
+                    titulo: "Eliminar anotación",
+                    mensaje: "¿Eliminar esta anotación del mapa?",
+                  });
+                  if (ok) eliminarAnot.mutate(selAnot.id);
+                }}
+              >
                 <Trash2 className="h-3.5 w-3.5" /> Eliminar
               </Button>
             </div>

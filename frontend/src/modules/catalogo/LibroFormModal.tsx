@@ -5,6 +5,7 @@ import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
+import { useToast } from "@/shared/components/ui/Toast";
 import type { Libro, Coleccion, Estante, LibroInput } from "@/shared/types";
 import { crearLibro, actualizarLibro } from "./api";
 
@@ -30,6 +31,7 @@ function estadoInicial(libro: Libro | null): LibroInput {
 
 export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes }: Props) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [form, setForm] = useState<LibroInput>(estadoInicial(libro));
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +58,7 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
       qc.invalidateQueries({ queryKey: ["libros"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success(libro ? "Libro actualizado" : "Libro creado");
       onClose();
     },
     onError: (err: any) => {

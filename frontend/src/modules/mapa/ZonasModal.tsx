@@ -4,19 +4,22 @@ import { Plus, Trash2, Check, Loader2 } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
 import { Button } from "@/shared/components/ui/Button";
+import { useToast } from "@/shared/components/ui/Toast";
+import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import type { Zona } from "@/shared/types";
 import { crearZona, actualizarZona, eliminarZona } from "@/modules/catalogo/api";
 
 /** ABM de zonas/pisos del mapa (RF-11). */
 export function ZonasModal({ zonas, onClose }: { zonas: Zona[]; onClose: () => void }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [nuevo, setNuevo] = useState("");
   const invalidar = () => qc.invalidateQueries({ queryKey: ["zonas"] });
-  const alertar = (err: any) => window.alert(err?.response?.data?.detail ?? "No se pudo completar la operación");
+  const alertar = (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo completar la operación");
 
   const agregar = useMutation({
     mutationFn: (nombre: string) => crearZona({ nombre, orden: zonas.length }),
-    onSuccess: () => { setNuevo(""); invalidar(); },
+    onSuccess: () => { setNuevo(""); invalidar(); toast.success("Zona creada"); },
     onError: alertar,
   });
 
@@ -49,17 +52,19 @@ export function ZonasModal({ zonas, onClose }: { zonas: Zona[]; onClose: () => v
 }
 
 function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => void; onDone: () => void }) {
+  const toast = useToast();
+  const confirmar = useConfirm();
   const [nombre, setNombre] = useState(zona.nombre);
   const cambiado = nombre.trim() !== zona.nombre && nombre.trim().length > 0;
 
   const renombrar = useMutation({
     mutationFn: () => actualizarZona(zona.id, { nombre: nombre.trim() }),
-    onSuccess: onDone,
+    onSuccess: () => { onDone(); toast.success("Zona actualizada"); },
     onError,
   });
   const eliminar = useMutation({
     mutationFn: () => eliminarZona(zona.id),
-    onSuccess: onDone,
+    onSuccess: () => { onDone(); toast.success("Zona eliminada"); },
     onError, // RN: bloquea si tiene estantes
   });
 
@@ -75,7 +80,16 @@ function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => v
         <Check className="h-4 w-4" />
       </button>
       <button
-        onClick={() => { if (window.confirm(`¿Eliminar la zona "${zona.nombre}"?`)) eliminar.mutate(); }}
+        onClick={async () => {
+          const ok = await confirmar({
+            mensaje: (
+              <>
+                ¿Eliminar la zona <strong className="font-semibold text-stone-800">“{zona.nombre}”</strong>?
+              </>
+            ),
+          });
+          if (ok) eliminar.mutate();
+        }}
         disabled={eliminar.isPending}
         title="Eliminar zona"
         className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"

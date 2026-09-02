@@ -4,6 +4,8 @@ import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
+import { useToast } from "@/shared/components/ui/Toast";
+import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import type { Libro } from "@/shared/types";
 import { listarLibros, listarColecciones, listarEstantes, eliminarLibro } from "./api";
 import { LibroFormModal } from "./LibroFormModal";
@@ -18,6 +20,8 @@ function formatearPrecio(precio: string | null): string {
 
 export function CatalogoPage() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirmar = useConfirm();
   const [q, setQ] = useState("");
   const [coleccionId, setColeccionId] = useState("");
   const [estanteId, setEstanteId] = useState("");
@@ -46,7 +50,10 @@ export function CatalogoPage() {
       qc.invalidateQueries({ queryKey: ["libros"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success("Libro eliminado");
     },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el libro"),
   });
 
   const total = libros?.length ?? 0;
@@ -65,10 +72,16 @@ export function CatalogoPage() {
     setLibroEdit(libro);
     setModalAbierto(true);
   }
-  function confirmarEliminar(libro: Libro) {
-    if (window.confirm(`¿Eliminar "${libro.titulo}"? Esta acción no se puede deshacer.`)) {
-      eliminar.mutate(libro.id);
-    }
+  async function confirmarEliminar(libro: Libro) {
+    const ok = await confirmar({
+      mensaje: (
+        <>
+          ¿Eliminar <strong className="font-semibold text-stone-800">“{libro.titulo}”</strong>?
+          Esta acción no se puede deshacer.
+        </>
+      ),
+    });
+    if (ok) eliminar.mutate(libro.id);
   }
 
   return (
