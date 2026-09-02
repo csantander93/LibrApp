@@ -123,3 +123,71 @@ body {
     transform: translateY(0);
   }
 }
+
+/* Notificación (toast): entra deslizando desde la derecha. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Salida: se desliza hacia afuera a la derecha y se desvanece. */
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(120%) scale(0.96);
+  }
+}
+
+/* Barra de "recarga": consume el tiempo restante de izquierda a derecha. */
+@keyframes toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* El ícono aparece con un pequeño rebote. */
+@keyframes toast-badge-pop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* El check se dibuja trazando su recorrido. */
+@keyframes toast-check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Diálogo de confirmación: aparece con un leve acercamiento. */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

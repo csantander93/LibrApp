@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, FileSpreadsheet, CheckCircle2, Loader2, AlertTriangle } from "lucide-react";
 import { Card } from "@/shared/components/ui/Card";
 import { Button } from "@/shared/components/ui/Button";
+import { useToast } from "@/shared/components/ui/Toast";
 import type { ImportResultado } from "@/shared/types";
 import { importarLibros } from "./api";
 
 export function ImportarPage() {
   const qc = useQueryClient();
+  const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [archivo, setArchivo] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportResultado | null>(null);
@@ -45,6 +47,7 @@ export function ImportarPage() {
     qc.invalidateQueries({ queryKey: ["libros"] });
     qc.invalidateQueries({ queryKey: ["dashboard"] });
     qc.invalidateQueries({ queryKey: ["estantes"] });
+    toast.success(`Importación completada · ${res.creados} creados, ${res.actualizados} actualizados`);
   }
 
   return (
