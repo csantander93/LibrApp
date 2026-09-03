@@ -9,7 +9,8 @@ from app.modules.catalogo.schemas import (
     NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate,
 )
-from app.shared.exceptions import NotFoundError, ConflictError
+from app.modules.configuracion.service import obtener_configuracion
+from app.shared.exceptions import NotFoundError, ConflictError, ValidationError
 
 
 def _to_nivel_response(n: Nivel, total_libros: int = 0) -> NivelResponse:
@@ -118,6 +119,16 @@ def _validar_isbn_unico(db: Session, isbn: str | None, excluir_id: uuid.UUID | N
         raise ConflictError(f"Ya existe un libro con el ISBN {isbn}")
 
 
+def _validar_isbn_obligatorio(db: Session, isbn: str | None) -> None:
+    """RN-01/RN-02: si Configuración marca el ISBN como obligatorio, no se puede
+    crear/editar un libro sin ISBN. El admin puede desactivarlo en Configuración."""
+    if not isbn and obtener_configuracion(db).isbn_obligatorio:
+        raise ValidationError(
+            "El ISBN es obligatorio. Para cargar libros sin ISBN, "
+            "desactivá esa opción en Configuración."
+        )
+
+
 def _validar_fk(db: Session, coleccion_id, estante_id) -> None:
     if coleccion_id and not db.get(Coleccion, coleccion_id):
         raise NotFoundError("La colección indicada no existe")
@@ -152,6 +163,7 @@ def obtener_libro(db: Session, libro_id: uuid.UUID) -> Libro:
 
 
 def crear_libro(db: Session, data: LibroCreate) -> LibroResponse:
+    _validar_isbn_obligatorio(db, data.isbn)
     _validar_isbn_unico(db, data.isbn)
     _validar_fk(db, data.coleccion_id, data.estante_id)
     payload = data.model_dump()
@@ -167,6 +179,7 @@ def actualizar_libro(db: Session, libro_id: uuid.UUID, data: LibroUpdate) -> Lib
     lb = obtener_libro(db, libro_id)
     cambios = data.model_dump(exclude_unset=True)
     if "isbn" in cambios:
+        _validar_isbn_obligatorio(db, cambios["isbn"])
         _validar_isbn_unico(db, cambios["isbn"], excluir_id=libro_id)
     _validar_fk(db, cambios.get("coleccion_id"), cambios.get("estante_id"))
     # Coherencia estante↔nivel: recalcula el nivel según el estante final.

@@ -97,6 +97,11 @@ export interface ImportResultado {
   columnas_detectadas: Record<string, string>;
 }
 
+/** Ajustes generales de la app (editables en /admin/configuracion). */
+export interface Configuracion {
+  isbn_obligatorio: boolean;
+}
+
 /** Payload de alta/edición de un libro. */
 export interface LibroInput {
   titulo: string;

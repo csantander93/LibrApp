@@ -6,6 +6,7 @@ from app.core.config import get_settings
 from app.modules.auth.router import router as auth_router
 from app.modules.catalogo.router import router as catalogo_router
 from app.modules.dashboard.router import router as dashboard_router
+from app.modules.configuracion.router import router as configuracion_router
 
 settings = get_settings()
 
@@ -61,6 +62,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(catalogo_router, prefix=API_PREFIX)
 app.include_router(dashboard_router, prefix=API_PREFIX)
+app.include_router(configuracion_router, prefix=API_PREFIX)
 
 
 @app.get("/health", tags=["Health"])

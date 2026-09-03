@@ -8,6 +8,7 @@ import { CatalogoPage } from "@/modules/catalogo/CatalogoPage";
 import { EstantesPage } from "@/modules/catalogo/EstantesPage";
 import { ImportarPage } from "@/modules/catalogo/ImportarPage";
 import { MapaEditorPage } from "@/modules/mapa/MapaEditorPage";
+import { ConfiguracionPage } from "@/modules/configuracion/ConfiguracionPage";
 
 export function AppRoutes() {
   return (
@@ -30,6 +31,7 @@ export function AppRoutes() {
         <Route path="estantes" element={<EstantesPage />} />
         <Route path="mapa" element={<MapaEditorPage />} />
         <Route path="importar" element={<ImportarPage />} />
+        <Route path="configuracion" element={<ConfiguracionPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

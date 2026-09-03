@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
@@ -8,6 +8,7 @@ import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import type { Libro, Coleccion, Estante, LibroInput } from "@/shared/types";
 import { crearLibro, actualizarLibro } from "./api";
+import { obtenerConfiguracion } from "@/modules/configuracion/api";
 
 interface Props {
   abierto: boolean;
@@ -35,6 +36,10 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
   const toast = useToast();
   const [form, setForm] = useState<LibroInput>(estadoInicial(libro));
   const [error, setError] = useState<string | null>(null);
+
+  // ISBN obligatorio por defecto; el admin puede desactivarlo en Configuración.
+  const { data: config } = useQuery({ queryKey: ["configuracion"], queryFn: obtenerConfiguracion });
+  const isbnObligatorio = config?.isbn_obligatorio ?? true;
 
   // Reinicia el form cuando cambia el libro objetivo (abrir alta vs edición).
   const [libroId, setLibroId] = useState<string | null>(libro?.id ?? null);
@@ -101,8 +106,13 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
           </Campo>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Campo label="ISBN">
-            <Input value={form.isbn ?? ""} onChange={(e) => set("isbn")(e.target.value)} placeholder="Opcional" />
+          <Campo label={isbnObligatorio ? "ISBN *" : "ISBN"}>
+            <Input
+              value={form.isbn ?? ""}
+              onChange={(e) => set("isbn")(e.target.value)}
+              required={isbnObligatorio}
+              placeholder={isbnObligatorio ? "Obligatorio" : "Opcional"}
+            />
           </Campo>
           <Campo label="Precio">
             <Input

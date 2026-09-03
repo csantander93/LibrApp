@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, BookOpen, Map, LibrarySquare, Upload, LogOut } from "lucide-react";
+import { LayoutDashboard, BookOpen, Map, LibrarySquare, Upload, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/modules/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ const nav = [
   { to: "/admin/estantes", label: "Estantes", icon: LibrarySquare, enabled: true },
   { to: "/admin/mapa", label: "Mapa", icon: Map, enabled: true },
   { to: "/admin/importar", label: "Importar", icon: Upload, enabled: true },
+  { to: "/admin/configuracion", label: "Configuración", icon: Settings, enabled: true },
 ];
 
 export function AdminLayout() {
