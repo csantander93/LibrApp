@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 import type {
-  Libro, Coleccion, Zona, Estante, LibroInput, ImportResultado,
+  Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
   Anotacion, AnotacionTipo,
 } from "@/shared/types";
 
@@ -10,6 +10,7 @@ export interface LibroFiltros {
   q?: string;
   coleccion_id?: string;
   estante_id?: string;
+  nivel_id?: string;
   sin_ubicar?: boolean;
 }
 
@@ -18,6 +19,7 @@ export async function listarLibros(filtros: LibroFiltros = {}): Promise<Libro[]>
   if (filtros.q) params.q = filtros.q;
   if (filtros.coleccion_id) params.coleccion_id = filtros.coleccion_id;
   if (filtros.estante_id) params.estante_id = filtros.estante_id;
+  if (filtros.nivel_id) params.nivel_id = filtros.nivel_id;
   if (filtros.sin_ubicar) params.sin_ubicar = "true";
   const { data } = await api.get<Libro[]>("/catalogo/libros", { params });
   return data;
@@ -87,6 +89,7 @@ export interface EstanteInput {
   etiqueta: string | null;
   zona_id: string | null;
   color?: string | null;
+  cantidad_niveles?: number;
 }
 
 export async function crearEstante(input: EstanteInput): Promise<Estante> {
@@ -101,6 +104,22 @@ export async function actualizarEstante(id: string, input: Partial<EstanteInput>
 
 export async function eliminarEstante(id: string): Promise<void> {
   await api.delete(`/catalogo/estantes/${id}`);
+}
+
+// ─── Niveles ("pisos" del estante) ────────────────────────────────────────────
+
+export async function crearNivel(input: { estante_id: string; etiqueta?: string | null }): Promise<Nivel> {
+  const { data } = await api.post<Nivel>("/catalogo/niveles", input);
+  return data;
+}
+
+export async function actualizarNivel(id: string, input: { etiqueta: string | null }): Promise<Nivel> {
+  const { data } = await api.put<Nivel>(`/catalogo/niveles/${id}`, input);
+  return data;
+}
+
+export async function eliminarNivel(id: string): Promise<void> {
+  await api.delete(`/catalogo/niveles/${id}`);
 }
 
 export interface PosicionEstante {

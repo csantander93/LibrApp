@@ -23,7 +23,9 @@ export interface Libro {
   precio: string | null;
   coleccion_id: string | null;
   estante_id: string | null;
+  nivel_id: string | null;
   estante_codigo: string | null;
+  nivel_numero: number | null;
   coleccion_nombre: string | null;
 }
 
@@ -39,6 +41,15 @@ export interface Zona {
   orden: number;
 }
 
+/** Nivel ("piso") dentro de un estante. Numerados 1..N de abajo hacia arriba. */
+export interface Nivel {
+  id: string;
+  estante_id: string;
+  numero: number;
+  etiqueta: string | null;
+  total_libros: number;
+}
+
 export interface Estante {
   id: string;
   codigo: string;
@@ -51,6 +62,7 @@ export interface Estante {
   /** Color del bloque en el mapa (hex). null = color derivado de la zona. */
   color: string | null;
   total_libros: number;
+  niveles: Nivel[];
 }
 
 export type AnotacionTipo = "texto" | "flecha";
@@ -94,4 +106,5 @@ export interface LibroInput {
   precio: string | null;
   coleccion_id: string | null;
   estante_id: string | null;
+  nivel_id: string | null;
 }

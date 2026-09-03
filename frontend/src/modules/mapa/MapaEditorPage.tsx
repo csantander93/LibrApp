@@ -2,54 +2,28 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Save, Plus, Trash2, Loader2, Info, Layers,
-  Type, ArrowRight, RotateCcw, RotateCw, Copy,
+  Type, ArrowRight, RotateCcw, RotateCw, Copy, ChevronUp,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
-import { cn, COLORES_ESTANTE, colorEstante } from "@/lib/utils";
+import { ColorPicker } from "@/shared/components/ui/ColorPicker";
+import { colorEstante } from "@/lib/utils";
 import type { Estante, Anotacion, AnotacionTipo } from "@/shared/types";
 import {
   listarEstantes, listarZonas, listarAnotaciones,
   guardarPosiciones, crearEstante, eliminarEstante,
   crearAnotacion, guardarAnotaciones, eliminarAnotacion,
+  crearNivel, eliminarNivel,
   type PosicionEstante, type AnotacionPosicion,
 } from "@/modules/catalogo/api";
+import type { Nivel } from "@/shared/types";
+import { EstanteFormModal, siguienteCodigoEstante } from "@/modules/catalogo/EstanteFormModal";
 import { MapaCanvas } from "./MapaCanvas";
 import { EstantePanelInline } from "./EstantePanelInline";
 import { ZonasModal } from "./ZonasModal";
-
-/** Fila de swatches de color reutilizable. */
-function ColorPicker({ value, onChange }: { value: string | null; onChange: (c: string | null) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {COLORES_ESTANTE.map((c) => (
-        <button
-          key={c}
-          onClick={() => onChange(c)}
-          title={c}
-          className={cn(
-            "h-6 w-6 rounded-full border transition-transform hover:scale-110",
-            value?.toLowerCase() === c.toLowerCase() ? "border-stone-900 ring-2 ring-ambar" : "border-black/10",
-          )}
-          style={{ background: c }}
-        />
-      ))}
-      <button
-        onClick={() => onChange(null)}
-        title="Automático (color de zona)"
-        className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-full border bg-white text-[9px] font-bold text-stone-500 transition-transform hover:scale-110",
-          value === null ? "border-stone-900 ring-2 ring-ambar" : "border-stone-300",
-        )}
-      >
-        Aa
-      </button>
-    </div>
-  );
-}
 
 export function MapaEditorPage() {
   const qc = useQueryClient();
@@ -66,12 +40,14 @@ export function MapaEditorPage() {
   const [selEstId, setSelEstId] = useState<string | null>(null);
   const [selAnotId, setSelAnotId] = useState<string | null>(null);
   const [zonasModal, setZonasModal] = useState(false);
+  const [estanteModal, setEstanteModal] = useState(false);
   const [copiedEst, setCopiedEst] = useState<Estante | null>(null);
 
   // Refs para que el keyboard handler siempre vea los valores más recientes.
   const selEstRef = useRef<Estante | null>(null);
   const copiedEstRef = useRef<Estante | null>(null);
   const zonaIdRef = useRef<string>("");
+  const localEstRef = useRef<Estante[]>([]);
 
   // Sincroniza copias locales desde el server salvo que haya cambios sin guardar.
   useEffect(() => {
@@ -91,6 +67,7 @@ export function MapaEditorPage() {
   useEffect(() => { selEstRef.current = selEstante; }, [selEstante]);
   useEffect(() => { copiedEstRef.current = copiedEst; }, [copiedEst]);
   useEffect(() => { zonaIdRef.current = zonaId; }, [zonaId]);
+  useEffect(() => { localEstRef.current = localEst; }, [localEst]);
 
   // Ctrl+C: copiar estante seleccionado | Ctrl+V: pegar (crea uno nuevo vacío).
   useEffect(() => {
@@ -105,14 +82,14 @@ export function MapaEditorPage() {
       } else if (e.key === "v" && copiedEstRef.current) {
         e.preventDefault();
         const src = copiedEstRef.current;
-        const defaultCodigo = src.codigo + "-COPIA";
-        const codigo = window.prompt("Código del estante copiado:", defaultCodigo);
-        if (!codigo?.trim()) return;
+        // Código autogenerado (E{n}) para no depender de un prompt del navegador.
+        const codigo = siguienteCodigoEstante(localEstRef.current);
         try {
           const nuevo = await crearEstante({
-            codigo: codigo.trim().toUpperCase(),
+            codigo,
             etiqueta: src.etiqueta,
             zona_id: (src.zona_id ?? zonaIdRef.current) || null,
+            cantidad_niveles: src.niveles?.length || 1,
           });
           const patched: Estante = {
             ...nuevo,
@@ -127,8 +104,9 @@ export function MapaEditorPage() {
           setSelAnotId(null);
           setDirty(true);
           qc.invalidateQueries({ queryKey: ["estantes"] });
+          toast.success(`Estante ${codigo} pegado`);
         } catch (err: any) {
-          window.alert(err?.response?.data?.detail ?? "No se pudo pegar el estante");
+          toast.error(err?.response?.data?.detail ?? "No se pudo pegar el estante");
         }
       }
     }
@@ -170,18 +148,12 @@ export function MapaEditorPage() {
     onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudieron guardar los cambios"),
   });
 
-  // ── Alta de estante ─────────────────────────────────────────────────────────
-  const agregarEst = useMutation({
-    mutationFn: (codigo: string) => crearEstante({ codigo, etiqueta: null, zona_id: zonaId || null }),
-    onSuccess: (nuevo) => {
-      setLocalEst((prev) => [...prev, nuevo]);
-      setSelEstId(nuevo.id);
-      setSelAnotId(null);
-      qc.invalidateQueries({ queryKey: ["estantes"] });
-      toast.success("Estante creado");
-    },
-    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo crear el estante"),
-  });
+  // ── Alta de estante: alta optimista tras crearlo en el modal ─────────────────
+  function onEstanteCreado(nuevo: Estante) {
+    setLocalEst((prev) => (prev.some((e) => e.id === nuevo.id) ? prev : [...prev, nuevo]));
+    setSelEstId(nuevo.id);
+    setSelAnotId(null);
+  }
 
   const eliminarEst = useMutation({
     mutationFn: eliminarEstante,
@@ -192,6 +164,43 @@ export function MapaEditorPage() {
       toast.success("Estante eliminado");
     },
     onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo eliminar"),
+  });
+
+  // ── Alta / baja de niveles del estante seleccionado ──────────────────────────
+  function patchNiveles(estanteId: string, niveles: Nivel[]) {
+    setLocalEst((prev) => prev.map((e) => (e.id === estanteId ? { ...e, niveles } : e)));
+  }
+
+  const agregarNiv = useMutation({
+    mutationFn: (estanteId: string) => crearNivel({ estante_id: estanteId }),
+    onSuccess: (nuevo) => {
+      const est = localEst.find((e) => e.id === nuevo.estante_id);
+      if (est) patchNiveles(est.id, [...est.niveles, nuevo]);
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success(`Nivel ${nuevo.numero} agregado`);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo agregar el nivel"),
+  });
+
+  const quitarNiv = useMutation({
+    mutationFn: (nivelId: string) => eliminarNivel(nivelId),
+    onSuccess: (_d, nivelId) => {
+      // Optimista: quitar el nivel y renumerar 1..N (el server hace lo mismo).
+      setLocalEst((prev) =>
+        prev.map((e) => {
+          if (!e.niveles.some((n) => n.id === nivelId)) return e;
+          const niveles = e.niveles
+            .filter((n) => n.id !== nivelId)
+            .sort((a, b) => a.numero - b.numero)
+            .map((n, i) => ({ ...n, numero: i + 1 }));
+          return { ...e, niveles };
+        }),
+      );
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      qc.invalidateQueries({ queryKey: ["libros"] });
+      toast.success("Nivel eliminado");
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el nivel"),
   });
 
   // ── Alta / baja de anotaciones ──────────────────────────────────────────────
@@ -234,8 +243,7 @@ export function MapaEditorPage() {
   }
 
   function agregarEstante() {
-    const codigo = window.prompt("Código del nuevo estante (ej: E6, MESA-2):");
-    if (codigo?.trim()) agregarEst.mutate(codigo.trim().toUpperCase());
+    setEstanteModal(true);
   }
 
   function rotarEstante() {
@@ -389,6 +397,51 @@ export function MapaEditorPage() {
                 </div>
               </div>
 
+              {/* Niveles ("pisos") del estante */}
+              <div className="mt-3">
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    <Layers className="h-3 w-3" /> Niveles
+                  </p>
+                  <button
+                    onClick={() => agregarNiv.mutate(selEstante.id)}
+                    disabled={agregarNiv.isPending}
+                    className="flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-unla transition-colors hover:bg-unla/10 disabled:opacity-40"
+                    title="Agregar un nivel arriba"
+                  >
+                    <Plus className="h-3 w-3" /> Nivel
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {[...selEstante.niveles].sort((a, b) => b.numero - a.numero).map((n) => (
+                    <div
+                      key={n.id}
+                      className="flex items-center justify-between rounded-lg border border-stone-200 bg-white px-2 py-1"
+                    >
+                      <span className="flex items-center gap-1 text-xs text-stone-700">
+                        {n.numero === selEstante.niveles.length && <ChevronUp className="h-3 w-3 text-stone-300" />}
+                        <span className="font-medium">Nivel {n.numero}</span>
+                        <span className="text-[10px] text-stone-400">· {n.total_libros} libro(s)</span>
+                      </span>
+                      <button
+                        onClick={async () => {
+                          if (n.total_libros > 0) {
+                            toast.error(`El Nivel ${n.numero} tiene ${n.total_libros} libro(s). Reasignalos antes de eliminarlo.`);
+                            return;
+                          }
+                          const ok = await confirmar({ mensaje: `¿Eliminar el Nivel ${n.numero}?` });
+                          if (ok) quitarNiv.mutate(n.id);
+                        }}
+                        className="rounded p-0.5 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                        title="Eliminar nivel"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="mt-2">
                 <Button variant="danger" className="w-full px-2 py-1 text-xs" onClick={eliminarEstanteSel}>
                   <Trash2 className="h-3.5 w-3.5" /> Eliminar
@@ -418,7 +471,7 @@ export function MapaEditorPage() {
 
               <div className="mt-3">
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">Color</p>
-                <ColorPicker value={selAnot.color} onChange={(c) => patchAnot(selAnot.id, { color: c ?? "#7A1C30" })} />
+                <ColorPicker value={selAnot.color} allowAuto={false} onChange={(c) => patchAnot(selAnot.id, { color: c ?? "#7A1C30" })} />
               </div>
 
               <div className="mt-3">
@@ -469,6 +522,17 @@ export function MapaEditorPage() {
       </div>
 
       {zonasModal && <ZonasModal zonas={zonas} onClose={() => setZonasModal(false)} />}
+
+      {estanteModal && (
+        <EstanteFormModal
+          onClose={() => setEstanteModal(false)}
+          estante={null}
+          zonas={zonas}
+          estantes={localEst}
+          zonaIdDefault={zonaId || null}
+          onCreado={onEstanteCreado}
+        />
+      )}
     </div>
   );
 }

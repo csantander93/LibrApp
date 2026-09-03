@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, MapPin, BookMarked } from "lucide-react";
+import { Loader2, MapPin, BookMarked, Layers } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { listarLibros } from "@/modules/catalogo/api";
 import { colorLomo, altoLomo, cn } from "@/lib/utils";
@@ -32,8 +32,20 @@ export function EstantePopup({
     queryKey: ["libros", { estante_id: estante.id }],
     queryFn: () => listarLibros({ estante_id: estante.id }),
   });
+
+  // Niveles ("pisos") 1..N; por defecto el Nivel 1.
+  const niveles = [...estante.niveles].sort((a, b) => a.numero - b.numero);
+  const [nivelSelId, setNivelSelId] = useState<string | null>(niveles[0]?.id ?? null);
+  const nivelSel = niveles.find((n) => n.id === nivelSelId) ?? niveles[0] ?? null;
+
   const [selId, setSelId] = useState<string | null>(null);
-  const seleccionado = libros?.find((l) => l.id === selId) ?? libros?.[0] ?? null;
+  // Al cambiar de nivel, deseleccionar el libro para mostrar el primero del nivel.
+  useEffect(() => { setSelId(null); }, [nivelSelId]);
+
+  const librosNivel = (libros ?? []).filter(
+    (l) => (nivelSel ? l.nivel_id === nivelSel.id : true),
+  );
+  const seleccionado = librosNivel.find((l) => l.id === selId) ?? librosNivel[0] ?? null;
 
   return (
     <Modal abierto onClose={onClose} ancho="max-w-2xl" titulo="">
@@ -53,24 +65,48 @@ export function EstantePopup({
           </div>
         </div>
 
+        {/* Selector de niveles ("pisos") */}
+        {niveles.length > 1 && (
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <Layers className="h-3.5 w-3.5 text-stone-400" />
+            {[...niveles].reverse().map((n) => {
+              const activo = nivelSel?.id === n.id;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => setNivelSelId(n.id)}
+                  className={cn(
+                    "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
+                    activo
+                      ? "bg-unla text-white shadow-sm shadow-unla/30"
+                      : "bg-stone-100 text-stone-600 hover:bg-stone-200",
+                  )}
+                >
+                  Nivel {n.numero}{n.etiqueta ? ` · ${n.etiqueta}` : ""}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex items-center gap-2 py-8 text-stone-500">
             <Loader2 className="h-5 w-5 animate-spin" /> Cargando libros…
           </div>
         )}
 
-        {libros && libros.length === 0 && (
+        {libros && librosNivel.length === 0 && (
           <p className="rounded-xl border border-dashed border-stone-300 bg-papel/60 py-8 text-center text-sm text-stone-400">
-            Este estante no tiene libros asignados.
+            {nivelSel ? `El Nivel ${nivelSel.numero} no tiene libros.` : "Este estante no tiene libros asignados."}
           </p>
         )}
 
-        {libros && libros.length > 0 && (
+        {libros && librosNivel.length > 0 && (
           <>
             {/* Repisa de madera con lomos */}
             <div className="rounded-t-xl bg-gradient-to-b from-stone-50 to-stone-100 px-3 pt-4">
               <div className="flex items-end gap-[3px] overflow-x-auto pb-0">
-                {libros.map((l) => {
+                {librosNivel.map((l) => {
                   const lomo = colorLomo(l.id);
                   const activo = seleccionado?.id === l.id;
                   return (

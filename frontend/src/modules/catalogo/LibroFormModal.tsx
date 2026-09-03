@@ -26,6 +26,7 @@ function estadoInicial(libro: Libro | null): LibroInput {
     precio: libro?.precio ?? "",
     coleccion_id: libro?.coleccion_id ?? "",
     estante_id: libro?.estante_id ?? "",
+    nivel_id: libro?.nivel_id ?? "",
   };
 }
 
@@ -51,6 +52,7 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
         precio: form.precio?.toString().trim() || null,
         coleccion_id: form.coleccion_id || null,
         estante_id: form.estante_id || null,
+        nivel_id: form.estante_id ? (form.nivel_id || null) : null,
       };
       return libro ? actualizarLibro(libro.id, payload) : crearLibro(payload);
     },
@@ -74,6 +76,15 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
   }
 
   const set = (campo: keyof LibroInput) => (v: string) => setForm((f) => ({ ...f, [campo]: v }));
+
+  // Al cambiar de estante, resetear el nivel (los niveles dependen del estante).
+  function setEstante(v: string) {
+    setForm((f) => ({ ...f, estante_id: v, nivel_id: "" }));
+  }
+  const estanteSel = estantes.find((e) => e.id === form.estante_id) ?? null;
+  const nivelesDisponibles = estanteSel
+    ? [...estanteSel.niveles].sort((a, b) => a.numero - b.numero)
+    : [];
 
   return (
     <Modal abierto={abierto} onClose={onClose} titulo={libro ? "Editar libro" : "Nuevo libro"}>
@@ -113,7 +124,7 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
             </Select>
           </Campo>
           <Campo label="Ubicación (estante)">
-            <Select value={form.estante_id ?? ""} onChange={(e) => set("estante_id")(e.target.value)}>
+            <Select value={form.estante_id ?? ""} onChange={(e) => setEstante(e.target.value)}>
               <option value="">— Sin ubicar —</option>
               {estantes.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -123,6 +134,18 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
             </Select>
           </Campo>
         </div>
+        {estanteSel && nivelesDisponibles.length > 0 && (
+          <Campo label="Nivel">
+            <Select value={form.nivel_id ?? ""} onChange={(e) => set("nivel_id")(e.target.value)}>
+              <option value="">— Sin nivel —</option>
+              {nivelesDisponibles.map((n) => (
+                <option key={n.id} value={n.id}>
+                  Nivel {n.numero}{n.etiqueta ? ` · ${n.etiqueta}` : ""}
+                </option>
+              ))}
+            </Select>
+          </Campo>
+        )}
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 

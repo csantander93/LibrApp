@@ -1,17 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
-import { Input } from "@/shared/components/ui/Input";
-import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
-import { Modal } from "@/shared/components/ui/Modal";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
-import type { Estante, Zona } from "@/shared/types";
-import {
-  listarEstantes, listarZonas, crearEstante, actualizarEstante, eliminarEstante,
-  type EstanteInput,
-} from "./api";
+import type { Estante } from "@/shared/types";
+import { listarEstantes, listarZonas, eliminarEstante } from "./api";
+import { EstanteFormModal } from "./EstanteFormModal";
 
 export function EstantesPage() {
   const qc = useQueryClient();
@@ -74,13 +69,14 @@ export function EstantesPage() {
               <th className="px-4 py-3 font-medium">Código</th>
               <th className="px-4 py-3 font-medium">Etiqueta</th>
               <th className="px-4 py-3 font-medium">Zona</th>
+              <th className="px-4 py-3 text-right font-medium">Niveles</th>
               <th className="px-4 py-3 text-right font-medium">Libros</th>
               <th className="px-4 py-3 text-right font-medium">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                 <Loader2 className="mx-auto h-5 w-5 animate-spin" />
               </td></tr>
             )}
@@ -91,6 +87,7 @@ export function EstantesPage() {
                 </td>
                 <td className="px-4 py-3 text-slate-600">{e.etiqueta ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-600">{nombreZona(e.zona_id)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-slate-700">{e.niveles?.length ?? 0}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-700">{e.total_libros}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
@@ -121,92 +118,9 @@ export function EstantesPage() {
           onClose={() => setModal(false)}
           estante={edit}
           zonas={zonas}
+          estantes={estantes ?? []}
         />
       )}
     </div>
-  );
-}
-
-function EstanteFormModal({
-  onClose, estante, zonas,
-}: { onClose: () => void; estante: Estante | null; zonas: Zona[] }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [form, setForm] = useState<EstanteInput>({
-    codigo: estante?.codigo ?? "",
-    etiqueta: estante?.etiqueta ?? "",
-    zona_id: estante?.zona_id ?? (zonas[0]?.id ?? null),
-  });
-  const [error, setError] = useState<string | null>(null);
-
-  const mutation = useMutation({
-    mutationFn: () => {
-      const payload: EstanteInput = {
-        codigo: form.codigo.trim(),
-        etiqueta: form.etiqueta?.trim() || null,
-        zona_id: form.zona_id || null,
-      };
-      return estante ? actualizarEstante(estante.id, payload) : crearEstante(payload);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["estantes"] });
-      toast.success(estante ? "Estante actualizado" : "Estante creado");
-      onClose();
-    },
-    onError: (err: any) => {
-      const detail = err?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : "No se pudo guardar el estante");
-    },
-  });
-
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    mutation.mutate();
-  }
-
-  return (
-    <Modal abierto onClose={onClose} titulo={estante ? "Editar estante" : "Nuevo estante"}>
-      <form onSubmit={onSubmit} className="space-y-3">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Código *</label>
-          <Input
-            value={form.codigo}
-            onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
-            placeholder="E1, MESA-CENTRAL, ENTRADA…"
-            required
-            autoFocus
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Etiqueta</label>
-          <Input
-            value={form.etiqueta ?? ""}
-            onChange={(e) => setForm((f) => ({ ...f, etiqueta: e.target.value }))}
-            placeholder="Nombre descriptivo (opcional)"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Zona</label>
-          <Select
-            value={form.zona_id ?? ""}
-            onChange={(e) => setForm((f) => ({ ...f, zona_id: e.target.value || null }))}
-          >
-            <option value="">— Sin zona —</option>
-            {zonas.map((z) => <option key={z.id} value={z.id}>{z.nombre}</option>)}
-          </Select>
-        </div>
-
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" disabled={mutation.isPending}>
-            {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Guardar
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }

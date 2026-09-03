@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.modules.auth.models import Usuario, RolEnum
-from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa
+from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel
 
 settings = get_settings()
 
@@ -95,6 +95,11 @@ def _seed_estantes(db, zona: Zona) -> dict[str, Estante]:
             )
             db.add(est)
             db.flush()
+        # 3 niveles por estante (para mostrar la feature); idempotente.
+        if not db.query(Nivel).filter(Nivel.estante_id == est.id).first():
+            for numero in range(1, 4):
+                db.add(Nivel(estante_id=est.id, numero=numero))
+            db.flush()
         out[codigo] = est
     return out
 
@@ -116,7 +121,7 @@ def _seed_anotaciones(db, zona: Zona) -> None:
     print("[seed] Anotaciones de mapa cargadas.", flush=True)
 
 
-def _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estante) -> bool:
+def _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estante, nivel=None) -> bool:
     """Inserta el libro solo si no existe (por ISBN o por título+editorial). Devuelve True si creó."""
     if isbn and db.query(Libro).filter(Libro.isbn == isbn).first():
         return False
@@ -127,6 +132,7 @@ def _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estant
         precio=Decimal(str(precio)) if precio else None,
         coleccion_id=coleccion.id if coleccion else None,
         estante_id=estante.id if estante else None,
+        nivel_id=nivel.id if nivel else None,
     ))
     db.flush()  # hace visible el INSERT para los checks siguientes dentro de la misma transacción
     return True
@@ -261,9 +267,27 @@ def _seed_libros(db, colecciones: dict[str, Coleccion], estantes: dict[str, Esta
         ("978-950-670-345-6", "Antología poética", "Pablo Neruda", "Losada", 14000, hum, None),
     ]
 
+    # Niveles por estante, ordenados 1..N, para repartir los libros round-robin.
+    niveles_por_estante: dict = {}
+    def _niveles(estante) -> list:
+        if estante is None:
+            return []
+        if estante.id not in niveles_por_estante:
+            niveles_por_estante[estante.id] = (
+                db.query(Nivel).filter(Nivel.estante_id == estante.id).order_by(Nivel.numero).all()
+            )
+        return niveles_por_estante[estante.id]
+
+    contador: dict = {}  # estante_id -> índice de nivel para el round-robin
     insertados = 0
     for isbn, titulo, autor, editorial, precio, coleccion, estante in libros:
-        if _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estante):
+        nivel = None
+        niveles = _niveles(estante)
+        if niveles:
+            idx = contador.get(estante.id, 0)
+            nivel = niveles[idx % len(niveles)]
+            contador[estante.id] = idx + 1
+        if _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estante, nivel):
             insertados += 1
     if insertados:
         print(f"[seed] {insertados} libros nuevos cargados.", flush=True)

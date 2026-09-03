@@ -51,6 +51,33 @@ class Estante(UUIDMixin, TimestampMixin, Base):
 
     zona: Mapped["Zona | None"] = relationship(back_populates="estantes")
     libros: Mapped[list["Libro"]] = relationship(back_populates="estante")
+    # Niveles ("pisos") del estante — se muestran a la izquierda de los libros en el mapa.
+    niveles: Mapped[list["Nivel"]] = relationship(
+        back_populates="estante",
+        cascade="all, delete-orphan",
+        order_by="Nivel.numero",
+    )
+
+
+class Nivel(UUIDMixin, TimestampMixin, Base):
+    """Nivel/estante físico ("piso") dentro de un Estante.
+
+    Numerados 1..N de abajo hacia arriba (RF-02). Un libro se ubica en un nivel;
+    seleccionar estante → nivel muestra los libros de ese nivel en el mapa.
+    """
+    __tablename__ = "niveles"
+    __table_args__ = (
+        UniqueConstraint("estante_id", "numero", name="uq_nivel_estante_numero"),
+    )
+
+    estante_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("estantes.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    numero: Mapped[int] = mapped_column(Integer, nullable=False)  # 1..N, abajo→arriba
+    etiqueta: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    estante: Mapped["Estante"] = relationship(back_populates="niveles")
+    libros: Mapped[list["Libro"]] = relationship(back_populates="nivel")
 
 
 class AnotacionMapa(UUIDMixin, TimestampMixin, Base):
@@ -96,6 +123,11 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     estante_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("estantes.id", ondelete="SET NULL"), nullable=True,
     )
+    # Nivel dentro del estante (RF-02). Nulo = ubicado en el estante sin nivel asignado.
+    nivel_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("niveles.id", ondelete="SET NULL"), nullable=True,
+    )
 
     coleccion: Mapped["Coleccion | None"] = relationship(back_populates="libros")
     estante: Mapped["Estante | None"] = relationship(back_populates="libros")
+    nivel: Mapped["Nivel | None"] = relationship(back_populates="libros")

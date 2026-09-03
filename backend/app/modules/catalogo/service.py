@@ -2,21 +2,36 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
-from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa
+from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel
 from app.modules.catalogo.schemas import (
-    LibroResponse, EstanteResponse, LibroCreate, LibroUpdate,
+    LibroResponse, EstanteResponse, NivelResponse, LibroCreate, LibroUpdate,
     EstanteCreate, EstanteUpdate, ColeccionCreate, ZonaCreate, ZonaUpdate,
+    NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate,
 )
 from app.shared.exceptions import NotFoundError, ConflictError
 
 
-def _to_estante_response(e: Estante, total_libros: int = 0) -> EstanteResponse:
+def _to_nivel_response(n: Nivel, total_libros: int = 0) -> NivelResponse:
+    return NivelResponse(
+        id=n.id, estante_id=n.estante_id, numero=n.numero,
+        etiqueta=n.etiqueta, total_libros=total_libros,
+    )
+
+
+def _to_estante_response(
+    e: Estante, total_libros: int = 0, conteos_nivel: dict | None = None,
+) -> EstanteResponse:
+    conteos_nivel = conteos_nivel or {}
+    niveles = [
+        _to_nivel_response(n, conteos_nivel.get(n.id, 0))
+        for n in sorted(e.niveles, key=lambda n: n.numero)
+    ]
     return EstanteResponse(
         id=e.id, codigo=e.codigo, etiqueta=e.etiqueta, zona_id=e.zona_id,
         pos_x=float(e.pos_x), pos_y=float(e.pos_y),
         ancho=float(e.ancho), alto=float(e.alto), color=e.color,
-        total_libros=total_libros,
+        total_libros=total_libros, niveles=niveles,
     )
 
 
@@ -38,16 +53,26 @@ def listar_estantes(db: Session) -> list[EstanteResponse]:
         .group_by(Libro.estante_id)
         .all()
     )
-    estantes = db.query(Estante).order_by(Estante.codigo).all()
-    return [_to_estante_response(e, conteos.get(e.id, 0)) for e in estantes]
+    # Conteo de libros por nivel (para el selector de niveles del mapa).
+    conteos_nivel = dict(
+        db.query(Libro.nivel_id, func.count(Libro.id))
+        .filter(Libro.nivel_id.isnot(None))
+        .group_by(Libro.nivel_id)
+        .all()
+    )
+    estantes = (
+        db.query(Estante).options(selectinload(Estante.niveles)).order_by(Estante.codigo).all()
+    )
+    return [_to_estante_response(e, conteos.get(e.id, 0), conteos_nivel) for e in estantes]
 
 
 def _to_libro_response(lb: Libro) -> LibroResponse:
     return LibroResponse(
         id=lb.id, isbn=lb.isbn, titulo=lb.titulo, autor=lb.autor,
         editorial=lb.editorial, precio=lb.precio,
-        coleccion_id=lb.coleccion_id, estante_id=lb.estante_id,
+        coleccion_id=lb.coleccion_id, estante_id=lb.estante_id, nivel_id=lb.nivel_id,
         estante_codigo=lb.estante.codigo if lb.estante else None,
+        nivel_numero=lb.nivel.numero if lb.nivel else None,
         coleccion_nombre=lb.coleccion.nombre if lb.coleccion else None,
     )
 
@@ -57,10 +82,13 @@ def listar_libros(
     q: str | None = None,
     coleccion_id=None,
     estante_id=None,
+    nivel_id=None,
     sin_ubicar: bool | None = None,
 ) -> list[LibroResponse]:
     """Listado con filtros (RF-06). Búsqueda case-insensitive por título/autor/ISBN (CU-01)."""
-    query = db.query(Libro).options(selectinload(Libro.estante), selectinload(Libro.coleccion))
+    query = db.query(Libro).options(
+        selectinload(Libro.estante), selectinload(Libro.coleccion), selectinload(Libro.nivel),
+    )
     if q:
         like = f"%{q.strip()}%"
         query = query.filter(
@@ -70,6 +98,8 @@ def listar_libros(
         query = query.filter(Libro.coleccion_id == coleccion_id)
     if estante_id:
         query = query.filter(Libro.estante_id == estante_id)
+    if nivel_id:
+        query = query.filter(Libro.nivel_id == nivel_id)
     if sin_ubicar is True:
         query = query.filter(Libro.estante_id.is_(None))
     return [_to_libro_response(lb) for lb in query.order_by(Libro.titulo).all()]
@@ -95,6 +125,25 @@ def _validar_fk(db: Session, coleccion_id, estante_id) -> None:
         raise NotFoundError("El estante indicado no existe")
 
 
+def _resolver_nivel(db: Session, estante_id, nivel_id, nivel_explicito: bool):
+    """Valida la coherencia estante↔nivel y devuelve el nivel_id normalizado.
+
+    Un nivel debe pertenecer al estante del libro. Si no coincide: error cuando el
+    nivel vino explícito en el request; si se arrastró de un valor previo (p. ej. el
+    estante cambió), se limpia silenciosamente a None.
+    """
+    if nivel_id is None:
+        return None
+    nivel = db.get(Nivel, nivel_id)
+    if not nivel:
+        raise NotFoundError("El nivel indicado no existe")
+    if nivel.estante_id != estante_id:
+        if nivel_explicito:
+            raise ConflictError("El nivel seleccionado no pertenece al estante indicado")
+        return None
+    return nivel_id
+
+
 def obtener_libro(db: Session, libro_id: uuid.UUID) -> Libro:
     lb = db.get(Libro, libro_id)
     if not lb:
@@ -105,7 +154,9 @@ def obtener_libro(db: Session, libro_id: uuid.UUID) -> Libro:
 def crear_libro(db: Session, data: LibroCreate) -> LibroResponse:
     _validar_isbn_unico(db, data.isbn)
     _validar_fk(db, data.coleccion_id, data.estante_id)
-    lb = Libro(**data.model_dump())
+    payload = data.model_dump()
+    payload["nivel_id"] = _resolver_nivel(db, data.estante_id, data.nivel_id, nivel_explicito=True)
+    lb = Libro(**payload)
     db.add(lb)
     db.commit()
     db.refresh(lb)
@@ -118,6 +169,12 @@ def actualizar_libro(db: Session, libro_id: uuid.UUID, data: LibroUpdate) -> Lib
     if "isbn" in cambios:
         _validar_isbn_unico(db, cambios["isbn"], excluir_id=libro_id)
     _validar_fk(db, cambios.get("coleccion_id"), cambios.get("estante_id"))
+    # Coherencia estante↔nivel: recalcula el nivel según el estante final.
+    estante_final = cambios.get("estante_id", lb.estante_id)
+    nivel_final = cambios.get("nivel_id", lb.nivel_id)
+    cambios["nivel_id"] = _resolver_nivel(
+        db, estante_final, nivel_final, nivel_explicito="nivel_id" in cambios,
+    )
     for campo, valor in cambios.items():
         setattr(lb, campo, valor)
     db.commit()
@@ -162,8 +219,14 @@ def crear_estante(db: Session, data: EstanteCreate) -> EstanteResponse:
     if data.zona_id and not db.get(Zona, data.zona_id):
         raise NotFoundError("La zona indicada no existe")
     _validar_codigo_estante(db, data.codigo, data.zona_id)
-    e = Estante(**data.model_dump())
+    campos = data.model_dump()
+    cantidad = campos.pop("cantidad_niveles", 1)
+    e = Estante(**campos)
     db.add(e)
+    db.flush()
+    # Niveles 1..N (abajo→arriba) creados junto con el estante (RF-02).
+    for numero in range(1, cantidad + 1):
+        db.add(Nivel(estante_id=e.id, numero=numero))
     db.commit()
     db.refresh(e)
     return _to_estante_response(e, 0)
@@ -275,6 +338,67 @@ def eliminar_estante(db: Session, estante_id: uuid.UUID) -> None:
             "Reasignalos o dejalos 'Sin ubicar' antes de eliminarlo."
         )
     db.delete(e)
+    db.commit()
+
+
+# ─── Escritura: Niveles ("pisos" del estante) ─────────────────────────────────
+
+def _conteo_libros_nivel(db: Session, nivel_id: uuid.UUID) -> int:
+    return db.query(func.count(Libro.id)).filter(Libro.nivel_id == nivel_id).scalar() or 0
+
+
+def obtener_nivel(db: Session, nivel_id: uuid.UUID) -> Nivel:
+    n = db.get(Nivel, nivel_id)
+    if not n:
+        raise NotFoundError("Nivel no encontrado")
+    return n
+
+
+def crear_nivel(db: Session, data: NivelCreate) -> NivelResponse:
+    estante = db.get(Estante, data.estante_id)
+    if not estante:
+        raise NotFoundError("El estante indicado no existe")
+    # Numera al final (max + 1), manteniendo 1..N contiguo.
+    max_num = (
+        db.query(func.max(Nivel.numero)).filter(Nivel.estante_id == data.estante_id).scalar() or 0
+    )
+    n = Nivel(estante_id=data.estante_id, numero=max_num + 1, etiqueta=data.etiqueta)
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    return _to_nivel_response(n, 0)
+
+
+def actualizar_nivel(db: Session, nivel_id: uuid.UUID, data: NivelUpdate) -> NivelResponse:
+    n = obtener_nivel(db, nivel_id)
+    cambios = data.model_dump(exclude_unset=True)
+    for campo, valor in cambios.items():
+        setattr(n, campo, valor)
+    db.commit()
+    db.refresh(n)
+    return _to_nivel_response(n, _conteo_libros_nivel(db, n.id))
+
+
+def eliminar_nivel(db: Session, nivel_id: uuid.UUID) -> None:
+    """Guarda análoga a RN-08: no se puede eliminar un nivel con libros.
+    Tras borrar, renumera los niveles restantes del estante para mantenerlos 1..N."""
+    n = obtener_nivel(db, nivel_id)
+    total = _conteo_libros_nivel(db, n.id)
+    if total > 0:
+        raise ConflictError(
+            f"El nivel {n.numero} tiene {total} libro(s) asignado(s). "
+            "Reasignalos antes de eliminarlo."
+        )
+    estante_id = n.estante_id
+    db.delete(n)
+    db.flush()
+    # Renumerar 1..N por orden actual (evita huecos tras el borrado).
+    restantes = (
+        db.query(Nivel).filter(Nivel.estante_id == estante_id).order_by(Nivel.numero).all()
+    )
+    for idx, nivel in enumerate(restantes, start=1):
+        if nivel.numero != idx:
+            nivel.numero = idx
     db.commit()
 
 

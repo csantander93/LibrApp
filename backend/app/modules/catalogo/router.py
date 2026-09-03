@@ -10,6 +10,7 @@ from app.modules.catalogo.schemas import (
     LibroCreate, LibroUpdate, PrecioUpdate,
     EstanteCreate, EstanteUpdate, ColeccionCreate, ImportResultado,
     PosicionesUpdate, ZonaCreate, ZonaUpdate,
+    NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
 )
 
@@ -26,11 +27,13 @@ def listar_libros(
     q: str | None = None,
     coleccion_id: uuid.UUID | None = None,
     estante_id: uuid.UUID | None = None,
+    nivel_id: uuid.UUID | None = None,
     sin_ubicar: bool | None = None,
     db: Session = Depends(get_db),
 ):
     return service.listar_libros(
-        db, q=q, coleccion_id=coleccion_id, estante_id=estante_id, sin_ubicar=sin_ubicar,
+        db, q=q, coleccion_id=coleccion_id, estante_id=estante_id,
+        nivel_id=nivel_id, sin_ubicar=sin_ubicar,
     )
 
 
@@ -99,6 +102,23 @@ def actualizar_estante(estante_id: uuid.UUID, data: EstanteUpdate, db: Session =
 @router.delete("/estantes/{estante_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[ADMIN])
 def eliminar_estante(estante_id: uuid.UUID, db: Session = Depends(get_db)):
     service.eliminar_estante(db, estante_id)
+
+
+# ─── Escritura: Niveles ("pisos" del estante — RF-02) ─────────────────────────
+
+@router.post("/niveles", response_model=NivelResponse, status_code=status.HTTP_201_CREATED, dependencies=[ADMIN])
+def crear_nivel(data: NivelCreate, db: Session = Depends(get_db)):
+    return service.crear_nivel(db, data)
+
+
+@router.put("/niveles/{nivel_id}", response_model=NivelResponse, dependencies=[ADMIN])
+def actualizar_nivel(nivel_id: uuid.UUID, data: NivelUpdate, db: Session = Depends(get_db)):
+    return service.actualizar_nivel(db, nivel_id, data)
+
+
+@router.delete("/niveles/{nivel_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[ADMIN])
+def eliminar_nivel(nivel_id: uuid.UUID, db: Session = Depends(get_db)):
+    service.eliminar_nivel(db, nivel_id)
 
 
 # ─── Escritura: Anotaciones del mapa (flechas / textos) ───────────────────────

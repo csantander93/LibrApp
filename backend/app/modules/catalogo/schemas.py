@@ -47,6 +47,16 @@ class ZonaUpdate(BaseModel):
         return v
 
 
+class NivelResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    estante_id: uuid.UUID
+    numero: int
+    etiqueta: str | None = None
+    # Denormalizado para la UI.
+    total_libros: int = 0
+
+
 class EstanteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -60,6 +70,7 @@ class EstanteResponse(BaseModel):
     color: str | None = None
     # Denormalizado para la UI.
     total_libros: int = 0
+    niveles: list[NivelResponse] = []
 
 
 class LibroResponse(BaseModel):
@@ -72,7 +83,9 @@ class LibroResponse(BaseModel):
     precio: Decimal | None
     coleccion_id: uuid.UUID | None
     estante_id: uuid.UUID | None
+    nivel_id: uuid.UUID | None = None
     estante_codigo: str | None = None
+    nivel_numero: int | None = None
     coleccion_nombre: str | None = None
 
 
@@ -94,6 +107,7 @@ class LibroCreate(BaseModel):
     precio: Decimal | None = None
     coleccion_id: uuid.UUID | None = None
     estante_id: uuid.UUID | None = None  # None = 'Sin ubicar' (RN-07)
+    nivel_id: uuid.UUID | None = None
 
     @field_validator("titulo", "autor", "editorial")
     @classmethod
@@ -118,6 +132,7 @@ class LibroUpdate(BaseModel):
     precio: Decimal | None = None
     coleccion_id: uuid.UUID | None = None
     estante_id: uuid.UUID | None = None
+    nivel_id: uuid.UUID | None = None
 
     @field_validator("titulo", "autor", "editorial")
     @classmethod
@@ -146,6 +161,7 @@ class EstanteCreate(BaseModel):
     ancho: float = 12
     alto: float = 10
     color: str | None = None
+    cantidad_niveles: int = 1  # niveles a crear junto con el estante (1..N)
 
     @field_validator("codigo")
     @classmethod
@@ -153,6 +169,13 @@ class EstanteCreate(BaseModel):
         v = (v or "").strip().upper()
         if not v:
             raise ValueError("El código es obligatorio")
+        return v
+
+    @field_validator("cantidad_niveles")
+    @classmethod
+    def _cantidad_valida(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Debe crear al menos un nivel")
         return v
 
 
@@ -175,6 +198,34 @@ class EstanteUpdate(BaseModel):
         if not v:
             raise ValueError("El código no puede quedar vacío")
         return v
+
+
+# ─── Escritura: Niveles ("pisos" del estante — RF-02) ─────────────────────────
+
+def _etiqueta_nivel(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
+class NivelCreate(BaseModel):
+    estante_id: uuid.UUID
+    etiqueta: str | None = None
+
+    @field_validator("etiqueta")
+    @classmethod
+    def _etiqueta_norm(cls, v: str | None) -> str | None:
+        return _etiqueta_nivel(v)
+
+
+class NivelUpdate(BaseModel):
+    etiqueta: str | None = None
+
+    @field_validator("etiqueta")
+    @classmethod
+    def _etiqueta_norm(cls, v: str | None) -> str | None:
+        return _etiqueta_nivel(v)
 
 
 # ─── Mapa: guardado de posiciones (RF-10 / CU-05) ─────────────────────────────
