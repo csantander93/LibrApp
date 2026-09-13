@@ -1,6 +1,7 @@
 import { Pencil, MapPinOff } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Button } from "@/shared/components/ui/Button";
+import { ImagenCarrusel } from "./ImagenCarrusel";
 import type { Libro } from "@/shared/types";
 
 function formatearPrecio(precio: string | null): string {
@@ -44,6 +45,12 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
 
   return (
     <Modal abierto onClose={onClose} titulo="Detalle del libro">
+      {libro.imagenes.length > 0 && (
+        <div className="mb-5">
+          <ImagenCarrusel imagenes={libro.imagenes} alt={libro.titulo} />
+        </div>
+      )}
+
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <Campo etiqueta="Título">

@@ -2,7 +2,9 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
-from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel
+from app.modules.catalogo.models import (
+    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen,
+)
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, NivelResponse, LibroCreate, LibroUpdate,
     EstanteCreate, EstanteUpdate, ColeccionCreate, ZonaCreate, ZonaUpdate,
@@ -89,6 +91,9 @@ def _to_libro_response(lb: Libro) -> LibroResponse:
         estante_codigo=lb.estante.codigo if lb.estante else None,
         nivel_numero=lb.nivel.numero if lb.nivel else None,
         coleccion_nombre=lb.coleccion.nombre if lb.coleccion else None,
+        # La relación ya viene ordenada por `orden` (portada primero). El binario
+        # es una columna diferida: acá solo se leen los ids, no se trae la imagen.
+        imagenes=[img.id for img in lb.imagenes],
     )
 
 
@@ -103,6 +108,7 @@ def listar_libros(
     """Listado con filtros (RF-06). Búsqueda case-insensitive por título/autor/ISBN (CU-01)."""
     query = db.query(Libro).options(
         selectinload(Libro.estante), selectinload(Libro.coleccion), selectinload(Libro.nivel),
+        selectinload(Libro.imagenes),
     )
     if q:
         like = f"%{q.strip()}%"
@@ -223,6 +229,93 @@ def eliminar_libro(db: Session, libro_id: uuid.UUID) -> None:
     lb = obtener_libro(db, libro_id)
     db.delete(lb)
     db.commit()
+
+
+# ─── Imágenes del libro (portada / vistas) ────────────────────────────────────
+
+# Tope de imágenes por libro y tamaño máximo por archivo (5 MB). Tipos aceptados:
+# formatos web usuales. Sin procesamiento (no se recomprime ni redimensiona).
+MAX_IMAGENES_LIBRO = 5
+MAX_IMAGEN_BYTES = 5 * 1024 * 1024
+CONTENT_TYPES_IMAGEN = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
+
+
+def obtener_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
+    img = db.get(LibroImagen, imagen_id)
+    if not img:
+        raise NotFoundError("Imagen no encontrada")
+    return img
+
+
+def agregar_imagen(
+    db: Session, libro_id: uuid.UUID, content_type: str, contenido: bytes,
+) -> LibroImagen:
+    """Agrega una imagen al final de la galería del libro (RF-04). Valida tipo,
+    tamaño y el tope por libro."""
+    lb = obtener_libro(db, libro_id)
+    if content_type not in CONTENT_TYPES_IMAGEN:
+        raise ValidationError("Formato de imagen no admitido (usá JPG, PNG, WEBP, GIF o AVIF)")
+    if not contenido:
+        raise ValidationError("El archivo está vacío")
+    if len(contenido) > MAX_IMAGEN_BYTES:
+        raise ValidationError("La imagen supera el tamaño máximo (5 MB)")
+    total = (
+        db.query(func.count(LibroImagen.id)).filter(LibroImagen.libro_id == libro_id).scalar() or 0
+    )
+    if total >= MAX_IMAGENES_LIBRO:
+        raise ConflictError(f"Un libro admite hasta {MAX_IMAGENES_LIBRO} imágenes")
+    max_orden = (
+        db.query(func.max(LibroImagen.orden)).filter(LibroImagen.libro_id == libro_id).scalar()
+    )
+    siguiente = 0 if max_orden is None else max_orden + 1
+    img = LibroImagen(
+        libro_id=libro_id, orden=siguiente, content_type=content_type, contenido=contenido,
+    )
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+    return img
+
+
+def _renumerar_imagenes(db: Session, libro_id: uuid.UUID) -> None:
+    """Deja el `orden` de las imágenes contiguo (0..N) según el orden actual."""
+    imgs = (
+        db.query(LibroImagen)
+        .filter(LibroImagen.libro_id == libro_id)
+        .order_by(LibroImagen.orden)
+        .all()
+    )
+    for idx, img in enumerate(imgs):
+        if img.orden != idx:
+            img.orden = idx
+
+
+def eliminar_imagen(db: Session, imagen_id: uuid.UUID) -> uuid.UUID:
+    """Elimina una imagen y renumera el resto. Devuelve el id del libro afectado."""
+    img = obtener_imagen(db, imagen_id)
+    libro_id = img.libro_id
+    db.delete(img)
+    db.flush()
+    _renumerar_imagenes(db, libro_id)
+    db.commit()
+    return libro_id
+
+
+def hacer_principal_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
+    """Marca una imagen como portada (orden 0) y desplaza el resto."""
+    img = obtener_imagen(db, imagen_id)
+    otras = (
+        db.query(LibroImagen)
+        .filter(LibroImagen.libro_id == img.libro_id, LibroImagen.id != img.id)
+        .order_by(LibroImagen.orden)
+        .all()
+    )
+    img.orden = 0
+    for idx, otra in enumerate(otras, start=1):
+        otra.orden = idx
+    db.commit()
+    db.refresh(img)
+    return img
 
 
 # ─── Escritura: Estante ───────────────────────────────────────────────────────

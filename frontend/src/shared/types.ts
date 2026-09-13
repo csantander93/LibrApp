@@ -27,6 +27,15 @@ export interface Libro {
   estante_codigo: string | null;
   nivel_numero: number | null;
   coleccion_nombre: string | null;
+  /** Ids de las imágenes ordenadas; la primera es la portada/principal. */
+  imagenes: string[];
+}
+
+/** Metadatos de una imagen de libro (el binario se pide por su URL). */
+export interface LibroImagen {
+  id: string;
+  orden: number;
+  content_type: string;
 }
 
 export interface Coleccion {

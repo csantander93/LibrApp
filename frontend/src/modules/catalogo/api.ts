@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import type {
   Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
-  Anotacion, AnotacionTipo,
+  Anotacion, AnotacionTipo, LibroImagen,
 } from "@/shared/types";
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -80,6 +80,29 @@ export async function actualizarPrecio(id: string, precio: string | null): Promi
 
 export async function eliminarLibro(id: string): Promise<void> {
   await api.delete(`/catalogo/libros/${id}`);
+}
+
+// ─── Imágenes de libros ───────────────────────────────────────────────────────
+
+/** URL pública para mostrar una imagen en un <img src>. */
+export function urlImagenLibro(imagenId: string): string {
+  return `${api.defaults.baseURL}/catalogo/imagenes/${imagenId}`;
+}
+
+export async function subirImagenesLibro(libroId: string, archivos: File[]): Promise<LibroImagen[]> {
+  const form = new FormData();
+  archivos.forEach((f) => form.append("archivos", f));
+  const { data } = await api.post<LibroImagen[]>(`/catalogo/libros/${libroId}/imagenes`, form);
+  return data;
+}
+
+export async function hacerPrincipalImagen(imagenId: string): Promise<LibroImagen> {
+  const { data } = await api.patch<LibroImagen>(`/catalogo/imagenes/${imagenId}/principal`);
+  return data;
+}
+
+export async function eliminarImagenLibro(imagenId: string): Promise<void> {
+  await api.delete(`/catalogo/imagenes/${imagenId}`);
 }
 
 // ─── Estantes (escritura) ─────────────────────────────────────────────────────

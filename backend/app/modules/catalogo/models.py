@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import String, Text, Integer, Numeric, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Text, Integer, Numeric, ForeignKey, UniqueConstraint, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.shared.models import Base, UUIDMixin, TimestampMixin
 
@@ -134,3 +134,30 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     coleccion: Mapped["Coleccion | None"] = relationship(back_populates="libros")
     estante: Mapped["Estante | None"] = relationship(back_populates="libros")
     nivel: Mapped["Nivel | None"] = relationship(back_populates="libros")
+    # Imágenes (portada u otras) del libro — opcionales. La de `orden` menor es la
+    # principal (portada). Se borran en cascada al eliminar el libro.
+    imagenes: Mapped[list["LibroImagen"]] = relationship(
+        back_populates="libro",
+        cascade="all, delete-orphan",
+        order_by="LibroImagen.orden",
+    )
+
+
+class LibroImagen(UUIDMixin, TimestampMixin, Base):
+    """Imagen asociada a un libro (portada o vista adicional) — opcional.
+
+    El binario vive en la propia DB (columna diferida: no se trae en los listados,
+    solo al servir la imagen por su endpoint). `orden` define la posición en la
+    galería; la de menor `orden` es la portada/principal que se muestra primero.
+    """
+    __tablename__ = "imagenes_libro"
+
+    libro_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("libros.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Diferida: los listados de libros no cargan el binario (solo id/orden/tipo).
+    contenido: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+
+    libro: Mapped["Libro"] = relationship(back_populates="imagenes")

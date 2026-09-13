@@ -7,7 +7,8 @@ import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import type { Libro, Coleccion, Estante, LibroInput } from "@/shared/types";
-import { crearLibro, actualizarLibro } from "./api";
+import { crearLibro, actualizarLibro, subirImagenesLibro } from "./api";
+import { LibroImagenesEditor } from "./LibroImagenesEditor";
 import { obtenerConfiguracion } from "@/modules/configuracion/api";
 
 interface Props {
@@ -36,6 +37,8 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
   const toast = useToast();
   const [form, setForm] = useState<LibroInput>(estadoInicial(libro));
   const [error, setError] = useState<string | null>(null);
+  // Alta: imágenes elegidas antes de que exista el libro; se suben tras crearlo.
+  const [pendingImgs, setPendingImgs] = useState<File[]>([]);
 
   // ISBN obligatorio por defecto; el admin puede desactivarlo en Configuración.
   const { data: config } = useQuery({ queryKey: ["configuracion"], queryFn: obtenerConfiguracion });
@@ -47,6 +50,7 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
     setLibroId(libro?.id ?? null);
     setForm(estadoInicial(libro));
     setError(null);
+    setPendingImgs([]);
   }
 
   const mutation = useMutation({
@@ -59,7 +63,17 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
         estante_id: form.estante_id || null,
         nivel_id: form.estante_id ? (form.nivel_id || null) : null,
       };
-      return libro ? actualizarLibro(libro.id, payload) : crearLibro(payload);
+      if (libro) return actualizarLibro(libro.id, payload);
+      const nuevo = await crearLibro(payload);
+      // Sube las imágenes elegidas en el alta al libro recién creado.
+      if (pendingImgs.length > 0) {
+        try {
+          await subirImagenesLibro(nuevo.id, pendingImgs);
+        } catch {
+          toast.error("El libro se creó, pero no se pudieron subir las imágenes");
+        }
+      }
+      return nuevo;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["libros"] });
@@ -156,6 +170,13 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
             </Select>
           </Campo>
         )}
+
+        <LibroImagenesEditor
+          libroId={libro?.id ?? null}
+          imagenesIniciales={libro?.imagenes ?? []}
+          pendingFiles={pendingImgs}
+          onPendingChange={setPendingImgs}
+        />
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 

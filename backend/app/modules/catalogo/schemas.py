@@ -74,6 +74,15 @@ class EstanteResponse(BaseModel):
     niveles: list[NivelResponse] = []
 
 
+class LibroImagenResponse(BaseModel):
+    """Metadatos de una imagen de libro (sin el binario). El binario se pide
+    aparte a GET /catalogo/imagenes/{id}."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    orden: int
+    content_type: str
+
+
 class LibroResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -88,6 +97,8 @@ class LibroResponse(BaseModel):
     estante_codigo: str | None = None
     nivel_numero: int | None = None
     coleccion_nombre: str | None = None
+    # Ids de las imágenes ordenadas (la primera es la portada/principal).
+    imagenes: list[uuid.UUID] = []
 
 
 # ─── Escritura: Libro (RF-04) ─────────────────────────────────────────────────

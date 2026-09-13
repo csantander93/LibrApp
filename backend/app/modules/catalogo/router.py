@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, UploadFile, File, Query, status
+from fastapi import APIRouter, Depends, UploadFile, File, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -12,6 +12,7 @@ from app.modules.catalogo.schemas import (
     PosicionesUpdate, ZonaCreate, ZonaUpdate,
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
+    LibroImagenResponse,
 )
 
 # Lectura: pública (RF-07). Escritura (ABM): protegida con require_admin (RN-05).
@@ -69,6 +70,18 @@ def listar_anotaciones(db: Session = Depends(get_db)):
     return service.listar_anotaciones(db)
 
 
+# Imagen de libro: lectura pública (RF-07) — se sirve el binario tal cual. Los ids
+# vienen en cada LibroResponse (campo `imagenes`).
+@router.get("/imagenes/{imagen_id}")
+def obtener_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db)):
+    img = service.obtener_imagen(db, imagen_id)
+    return Response(
+        content=img.contenido,
+        media_type=img.content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 # ─── Escritura: Libros (RF-04 / RF-09) ────────────────────────────────────────
 
 @router.post("/libros", response_model=LibroResponse, status_code=status.HTTP_201_CREATED)
@@ -99,6 +112,49 @@ def eliminar_libro(libro_id: uuid.UUID, db: Session = Depends(get_db), audit: Au
     titulo = libro.titulo
     service.eliminar_libro(db, libro_id)
     audit.registrar_accion(f"Eliminó el libro '{titulo}'", modulo=_MODULO, accion="Eliminación")
+
+
+# ─── Imágenes del libro (RF-04) ───────────────────────────────────────────────
+
+@router.post(
+    "/libros/{libro_id}/imagenes",
+    response_model=list[LibroImagenResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def subir_imagenes(
+    libro_id: uuid.UUID,
+    archivos: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT,
+):
+    """Sube una o varias imágenes y las agrega a la galería del libro (portada u
+    otras vistas). La primera imagen del libro queda como portada."""
+    libro = service.obtener_libro(db, libro_id)
+    creadas: list[LibroImagenResponse] = []
+    for archivo in archivos:
+        contenido = await archivo.read()
+        img = service.agregar_imagen(
+            db, libro_id, archivo.content_type or "", contenido,
+        )
+        creadas.append(LibroImagenResponse.model_validate(img))
+    audit.registrar_accion(
+        f"Agregó {len(creadas)} imagen(es) al libro '{libro.titulo}'",
+        modulo=_MODULO, accion="Edición",
+    )
+    return creadas
+
+
+@router.patch("/imagenes/{imagen_id}/principal", response_model=LibroImagenResponse)
+def hacer_principal_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    img = service.hacer_principal_imagen(db, imagen_id)
+    audit.registrar_accion("Definió la portada de un libro", modulo=_MODULO, accion="Edición")
+    return LibroImagenResponse.model_validate(img)
+
+
+@router.delete("/imagenes/{imagen_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    service.eliminar_imagen(db, imagen_id)
+    audit.registrar_accion("Eliminó una imagen de un libro", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Escritura: Estantes (RF-02) ──────────────────────────────────────────────

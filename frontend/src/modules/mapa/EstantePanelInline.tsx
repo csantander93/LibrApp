@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers } from "lucide-react";
 import { cn, colorLomo, altoLomo } from "@/lib/utils";
 import { listarLibros } from "@/modules/catalogo/api";
+import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
 import type { Estante, Libro, Zona } from "@/shared/types";
 
 interface Props {
@@ -324,6 +325,12 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
           <div
             className="absolute -bottom-[5px] left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b border-r border-stone-200 bg-white"
           />
+
+          {selectedLibro.imagenes.length > 0 && (
+            <div className="mb-2">
+              <ImagenCarrusel imagenes={selectedLibro.imagenes} alt={selectedLibro.titulo} altoClase="h-40" />
+            </div>
+          )}
 
           <div className="flex items-start justify-between gap-1">
             <p className="font-serif text-sm font-bold leading-snug text-stone-900">
