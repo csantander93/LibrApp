@@ -128,6 +128,7 @@ export interface PosicionEstante {
   pos_y: number;
   ancho?: number;
   alto?: number;
+  rotacion?: number;
   color?: string | null;
 }
 

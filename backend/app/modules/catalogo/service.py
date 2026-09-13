@@ -31,7 +31,8 @@ def _to_estante_response(
     return EstanteResponse(
         id=e.id, codigo=e.codigo, etiqueta=e.etiqueta, zona_id=e.zona_id,
         pos_x=float(e.pos_x), pos_y=float(e.pos_y),
-        ancho=float(e.ancho), alto=float(e.alto), color=e.color,
+        ancho=float(e.ancho), alto=float(e.alto),
+        rotacion=float(e.rotacion), color=e.color,
         total_libros=total_libros, niveles=niveles,
     )
 
@@ -276,6 +277,8 @@ def actualizar_posiciones(db: Session, posiciones) -> int:
             e.ancho = pos.ancho
         if pos.alto is not None:
             e.alto = pos.alto
+        if pos.rotacion is not None:
+            e.rotacion = pos.rotacion
         # color viene siempre en el payload; None limpia el color (vuelve al de zona).
         e.color = pos.color
         actualizados += 1

@@ -98,6 +98,7 @@ export function MapaEditorPage() {
             pos_y: Math.min(src.pos_y + 5, 90),
             ancho: src.ancho,
             alto: src.alto,
+            rotacion: src.rotacion ?? 0,
           };
           setLocalEst((prev) => [...prev, patched]);
           setSelEstId(nuevo.id);
@@ -130,7 +131,8 @@ export function MapaEditorPage() {
   const guardar = useMutation({
     mutationFn: async () => {
       const estPayload: PosicionEstante[] = localEst.map((e) => ({
-        id: e.id, pos_x: e.pos_x, pos_y: e.pos_y, ancho: e.ancho, alto: e.alto, color: e.color,
+        id: e.id, pos_x: e.pos_x, pos_y: e.pos_y, ancho: e.ancho, alto: e.alto,
+        rotacion: e.rotacion, color: e.color,
       }));
       const anotPayload: AnotacionPosicion[] = localAnot.map((a) => ({
         id: a.id, texto: a.texto, pos_x: a.pos_x, pos_y: a.pos_y,
@@ -246,18 +248,10 @@ export function MapaEditorPage() {
     setEstanteModal(true);
   }
 
-  function rotarEstante() {
+  function rotarEstante(delta: number) {
     if (!selEstante) return;
-    const { pos_x, pos_y, ancho, alto } = selEstante;
-    const cx = pos_x + ancho / 2;
-    const cy = pos_y + alto / 2;
-    const newPosX = Math.max(0, Math.min(cx - alto / 2, 100 - alto));
-    const newPosY = Math.max(0, Math.min(cy - ancho / 2, 100 - ancho));
-    patchEst(selEstante.id, {
-      ancho: alto, alto: ancho,
-      pos_x: Math.round(newPosX * 100) / 100,
-      pos_y: Math.round(newPosY * 100) / 100,
-    });
+    const rot = ((((selEstante.rotacion ?? 0) + delta) % 360) + 360) % 360;
+    patchEst(selEstante.id, { rotacion: Math.round(rot * 100) / 100 });
   }
 
   async function eliminarEstanteSel() {
@@ -340,8 +334,10 @@ export function MapaEditorPage() {
                   onSeleccionarAnotacion={(a) => { setSelAnotId(a.id); setSelEstId(null); }}
                   onMover={(id, x, y) => patchEst(id, { pos_x: x, pos_y: y })}
                   onResize={(id, w, h) => patchEst(id, { ancho: w, alto: h })}
+                  onRotar={(id, r) => patchEst(id, { rotacion: r })}
                   onMoverAnotacion={(id, x, y) => patchAnot(id, { pos_x: x, pos_y: y })}
                   onResizeAnotacion={(id, w, h) => patchAnot(id, { ancho: w, alto: h })}
+                  onRotarAnotacion={(id, r) => patchAnot(id, { rotacion: r })}
                   onAgregar={agregarEstante}
                 />
               </div>
@@ -389,12 +385,24 @@ export function MapaEditorPage() {
               </div>
 
               <div className="mt-3">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">Girar</p>
-                <div className="flex gap-1">
-                  <Button variant="outline" className="flex-1 px-2 py-1 text-xs" onClick={rotarEstante} title="Girar 90°">
-                    <RotateCw className="h-3.5 w-3.5" /> 90°
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                  Girar ({Math.round(selEstante.rotacion ?? 0)}°)
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" className="px-2 py-1" onClick={() => rotarEstante(-15)} title="Girar 15° a la izquierda">
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="outline" className="px-2 py-1" onClick={() => rotarEstante(15)} title="Girar 15° a la derecha">
+                    <RotateCw className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="outline" className="px-2 py-1 text-xs" onClick={() => rotarEstante(90)} title="Girar 90°">
+                    90°
+                  </Button>
+                  <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => patchEst(selEstante.id, { rotacion: 0 })}>
+                    Reset
                   </Button>
                 </div>
+                <p className="mt-1 text-[10px] text-stone-400">O arrastrá el tirador ↻ sobre el estante.</p>
               </div>
 
               {/* Niveles ("pisos") del estante */}

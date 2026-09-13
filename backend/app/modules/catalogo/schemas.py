@@ -67,6 +67,7 @@ class EstanteResponse(BaseModel):
     pos_y: float
     ancho: float
     alto: float
+    rotacion: float = 0
     color: str | None = None
     # Denormalizado para la UI.
     total_libros: int = 0
@@ -187,6 +188,7 @@ class EstanteUpdate(BaseModel):
     pos_y: float | None = None
     ancho: float | None = None
     alto: float | None = None
+    rotacion: float | None = None
     color: str | None = None
 
     @field_validator("codigo")
@@ -236,6 +238,7 @@ class EstantePosicion(BaseModel):
     pos_y: float
     ancho: float | None = None
     alto: float | None = None
+    rotacion: float | None = None
     color: str | None = None
 
 

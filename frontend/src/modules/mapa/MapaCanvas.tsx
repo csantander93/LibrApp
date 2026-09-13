@@ -1,5 +1,5 @@
 import { useRef, type PointerEvent } from "react";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil, Plus, RotateCw } from "lucide-react";
 import { cn, colorEstante, oscurecer } from "@/lib/utils";
 import type { Estante, Anotacion } from "@/shared/types";
 
@@ -14,8 +14,10 @@ interface Props {
   onSeleccionarAnotacion?: (a: Anotacion) => void;
   onMover?: (id: string, pos_x: number, pos_y: number) => void;
   onResize?: (id: string, ancho: number, alto: number) => void;
+  onRotar?: (id: string, rotacion: number) => void;
   onMoverAnotacion?: (id: string, pos_x: number, pos_y: number) => void;
   onResizeAnotacion?: (id: string, ancho: number, alto: number) => void;
+  onRotarAnotacion?: (id: string, rotacion: number) => void;
   onEditar?: () => void;
   onAgregar?: () => void;
 }
@@ -25,12 +27,14 @@ const MIN_ESTANTE = 4;
 const MIN_ANOT = 3;
 
 type Kind = "shelf" | "anot";
-type Mode = "move" | "resize";
+type Mode = "move" | "resize" | "rotate";
 interface DragState {
   kind: Kind; mode: Mode; id: string;
   ox: number; oy: number;
   startW: number; startH: number; startPx: number; startPy: number;
   posX: number; posY: number;
+  // Rotación: centro del item en px de pantalla y ángulo inicial del puntero.
+  cx: number; cy: number; startRot: number; startAngle: number;
 }
 
 function CtrlBtn({ label, onClick, children }: { label: string; onClick?: () => void; children: React.ReactNode }) {
@@ -59,8 +63,8 @@ function Flecha({ color }: { color: string }) {
 export function MapaCanvas({
   estantes, anotaciones = [], modo = "ver",
   seleccionadoId, seleccionadoAnotId, resaltados,
-  onSeleccionar, onSeleccionarAnotacion, onMover, onResize,
-  onMoverAnotacion, onResizeAnotacion, onEditar, onAgregar,
+  onSeleccionar, onSeleccionarAnotacion, onMover, onResize, onRotar,
+  onMoverAnotacion, onResizeAnotacion, onRotarAnotacion, onEditar, onAgregar,
 }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<DragState | null>(null);
@@ -83,6 +87,7 @@ export function MapaCanvas({
       ox: p.px - item.pos_x, oy: p.py - item.pos_y,
       startW: item.ancho, startH: item.alto, startPx: p.px, startPy: p.py,
       posX: item.pos_x, posY: item.pos_y,
+      cx: 0, cy: 0, startRot: 0, startAngle: 0,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
@@ -97,6 +102,27 @@ export function MapaCanvas({
       ox: 0, oy: 0,
       startW: item.ancho, startH: item.alto, startPx: p.px, startPy: p.py,
       posX: item.pos_x, posY: item.pos_y,
+      cx: 0, cy: 0, startRot: 0, startAngle: 0,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  // Gira el item manteniendo su tamaño: sigue el desplazamiento angular del puntero
+  // alrededor del centro (en px de pantalla, que no se mueve al rotar).
+  function beginRotate(e: PointerEvent, item: { id: string; pos_x: number; pos_y: number; ancho: number; alto: number; rotacion: number }, kind: Kind) {
+    if (modo !== "editar") return;
+    e.stopPropagation();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cx = rect.left + ((item.pos_x + item.ancho / 2) / 100) * rect.width;
+    const cy = rect.top + ((item.pos_y + item.alto / 2) / 100) * rect.height;
+    const startAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+    drag.current = {
+      kind, mode: "rotate", id: item.id,
+      ox: 0, oy: 0,
+      startW: item.ancho, startH: item.alto, startPx: 0, startPy: 0,
+      posX: item.pos_x, posY: item.pos_y,
+      cx, cy, startRot: item.rotacion ?? 0, startAngle,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
@@ -112,11 +138,19 @@ export function MapaCanvas({
       const ny = clamp(p.py - d.oy, 0, 100 - d.startH);
       const cb = d.kind === "shelf" ? onMover : onMoverAnotacion;
       cb?.(d.id, Math.round(nx * 100) / 100, Math.round(ny * 100) / 100);
-    } else {
+    } else if (d.mode === "resize") {
       const nw = clamp(d.startW + (p.px - d.startPx), min, 100 - d.posX);
       const nh = clamp(d.startH + (p.py - d.startPy), min, 100 - d.posY);
       const cb = d.kind === "shelf" ? onResize : onResizeAnotacion;
       cb?.(d.id, Math.round(nw * 100) / 100, Math.round(nh * 100) / 100);
+    } else {
+      const ang = (Math.atan2(e.clientY - d.cy, e.clientX - d.cx) * 180) / Math.PI;
+      let rot = d.startRot + (ang - d.startAngle);
+      rot = ((rot % 360) + 360) % 360;
+      // Con Shift, imantar a pasos de 15°.
+      if (e.shiftKey) rot = Math.round(rot / 15) * 15;
+      const cb = d.kind === "shelf" ? onRotar : onRotarAnotacion;
+      cb?.(d.id, Math.round(rot * 100) / 100);
     }
   }
 
@@ -135,6 +169,23 @@ export function MapaCanvas({
       className="absolute -bottom-1.5 -right-1.5 z-20 h-4 w-4 cursor-se-resize rounded-full border-2 border-white bg-unla shadow-md"
       title="Redimensionar"
     />
+  );
+
+  // Tirador de giro: sobresale por encima del item, unido por una guía. Mantener el
+  // clic y arrastrar en círculo rota el item sin cambiar su tamaño (Shift imanta a 15°).
+  const rotHandle = (item: { id: string; pos_x: number; pos_y: number; ancho: number; alto: number; rotacion: number }, kind: Kind) => (
+    <span className="pointer-events-none absolute -top-6 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center">
+      <span
+        onPointerDown={(e) => beginRotate(e, item, kind)}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        className="pointer-events-auto flex h-5 w-5 cursor-grab touch-none items-center justify-center rounded-full border-2 border-white bg-unla text-white shadow-md active:cursor-grabbing"
+        title="Girar (mantené Shift para pasos de 15°)"
+      >
+        <RotateCw className="h-3 w-3" />
+      </span>
+      <span className="h-2 w-[2px] bg-white/90 shadow-sm" />
+    </span>
   );
 
   return (
@@ -183,6 +234,7 @@ export function MapaCanvas({
                   <>
                     <span className="pointer-events-none absolute -inset-1 rounded-md ring-2 ring-ambar" />
                     {handle(a, "anot")}
+                    {rotHandle(a, "anot")}
                   </>
                 )}
               </div>
@@ -209,6 +261,7 @@ export function MapaCanvas({
                 style={{
                   left: `${est.pos_x}%`, top: `${est.pos_y}%`,
                   width: `${est.ancho}%`, height: `${est.alto}%`,
+                  transform: `rotate(${est.rotacion ?? 0}deg)`,
                   background: color,
                   border: `2px solid ${borde}`,
                   boxShadow: resaltado
@@ -222,7 +275,12 @@ export function MapaCanvas({
                 <span className="pointer-events-none max-w-full truncate rounded bg-black/25 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
                   {est.codigo}
                 </span>
-                {modo === "editar" && seleccionado && handle(est, "shelf")}
+                {modo === "editar" && seleccionado && (
+                  <>
+                    {handle(est, "shelf")}
+                    {rotHandle(est, "shelf")}
+                  </>
+                )}
               </button>
             );
           })}
@@ -237,9 +295,15 @@ export function MapaCanvas({
             </CtrlBtn>
           )}
           {onAgregar && (
-            <CtrlBtn label="Agregar estante" onClick={onAgregar}>
-              <Plus className="h-[18px] w-[18px]" />
-            </CtrlBtn>
+            <button
+              type="button"
+              onClick={onAgregar}
+              title="Agregar estante"
+              aria-label="Agregar estante"
+              className="flex cursor-pointer items-center justify-center text-unla transition-transform duration-150 hover:scale-125 hover:text-unla-dark active:scale-95"
+            >
+              <Plus className="h-5 w-5" strokeWidth={2.75} />
+            </button>
           )}
         </div>
       )}

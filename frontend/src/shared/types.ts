@@ -59,6 +59,8 @@ export interface Estante {
   pos_y: number;
   ancho: number;
   alto: number;
+  /** Giro del bloque en grados (se rota desde el editor sin alterar el tamaño). */
+  rotacion: number;
   /** Color del bloque en el mapa (hex). null = color derivado de la zona. */
   color: string | null;
   total_libros: number;

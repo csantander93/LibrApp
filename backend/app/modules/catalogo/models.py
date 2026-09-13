@@ -45,6 +45,9 @@ class Estante(UUIDMixin, TimestampMixin, Base):
     pos_y: Mapped[float] = mapped_column(Numeric(8, 2), default=0, nullable=False)
     ancho: Mapped[float] = mapped_column(Numeric(8, 2), default=10, nullable=False)
     alto: Mapped[float] = mapped_column(Numeric(8, 2), default=10, nullable=False)
+    # Giro del bloque en el mapa (grados). Se rota manualmente desde el editor sin
+    # alterar el tamaño (el resize sigue estirando de las esquinas).
+    rotacion: Mapped[float] = mapped_column(Numeric(6, 2), default=0, nullable=False)
     # Color del bloque en el mapa (hex, ej #3B82F6) para diferenciar categorías
     # de un vistazo. Nulo = color derivado de la zona en el front.
     color: Mapped[str | None] = mapped_column(String(9), nullable=True)

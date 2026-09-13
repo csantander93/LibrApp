@@ -31,6 +31,24 @@ body,
   height: 100%;
 }
 
+/*
+  Cursor de "mano" en todo lo clickeable. Tailwind v4 quitó del preflight el
+  `cursor: pointer` por defecto de los botones, así que lo reponemos globalmente
+  para botones, roles de botón, selects, links y labels HABILITADOS (los
+  deshabilitados conservan su `cursor-not-allowed`). Se usan selectores de
+  elemento (baja especificidad) para no pisar utilidades de cursor puntuales.
+*/
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select:not(:disabled),
+  summary,
+  label[for],
+  a[href] {
+    cursor: pointer;
+  }
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
