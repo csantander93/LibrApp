@@ -9,6 +9,7 @@ from app.shared.models import Base
 from app.modules.auth import models as _auth_models  # noqa: F401
 from app.modules.catalogo import models as _catalogo_models  # noqa: F401
 from app.modules.configuracion import models as _config_models  # noqa: F401
+from app.modules.auditoria import models as _auditoria_models  # noqa: F401
 
 config = context.config
 

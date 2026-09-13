@@ -11,6 +11,19 @@ from app.modules.catalogo.schemas import (
 )
 from app.modules.configuracion.service import obtener_configuracion
 from app.shared.exceptions import NotFoundError, ConflictError, ValidationError
+from app.shared.audit_utils import diff_cambios, describir_cambios
+
+
+def _stash_audit(resp, desc: str):
+    """Adjunta a `resp` la descripción de los campos que cambiaron (antes → después)
+    para que el router la anexe al log de acción. `desc` se calcula ANTES de los
+    setattr (con `describir_cambios(diff_cambios(entidad, cambios))`); esto solo lo
+    "cuelga" del objeto de respuesta. Devuelve `resp` para encadenar en el `return`."""
+    if desc:
+        # object.__setattr__: `resp` puede ser un modelo Pydantic (no acepta campos
+        # extra por asignación normal). El router lo lee con getattr(_audit_cambios).
+        object.__setattr__(resp, "_audit_cambios", desc)
+    return resp
 
 
 def _to_nivel_response(n: Nivel, total_libros: int = 0) -> NivelResponse:
@@ -189,11 +202,12 @@ def actualizar_libro(db: Session, libro_id: uuid.UUID, data: LibroUpdate) -> Lib
     cambios["nivel_id"] = _resolver_nivel(
         db, estante_final, nivel_final, nivel_explicito="nivel_id" in cambios,
     )
+    desc = describir_cambios(diff_cambios(lb, cambios))
     for campo, valor in cambios.items():
         setattr(lb, campo, valor)
     db.commit()
     db.refresh(lb)
-    return _to_libro_response(lb)
+    return _stash_audit(_to_libro_response(lb), desc)
 
 
 def actualizar_precio(db: Session, libro_id: uuid.UUID, precio) -> LibroResponse:
@@ -255,12 +269,13 @@ def actualizar_estante(db: Session, estante_id: uuid.UUID, data: EstanteUpdate) 
         raise NotFoundError("La zona indicada no existe")
     if "codigo" in cambios or "zona_id" in cambios:
         _validar_codigo_estante(db, nuevo_codigo, nueva_zona, excluir_id=estante_id)
+    desc = describir_cambios(diff_cambios(e, cambios))
     for campo, valor in cambios.items():
         setattr(e, campo, valor)
     db.commit()
     db.refresh(e)
     total = db.query(func.count(Libro.id)).filter(Libro.estante_id == e.id).scalar() or 0
-    return _to_estante_response(e, total)
+    return _stash_audit(_to_estante_response(e, total), desc)
 
 
 def actualizar_posiciones(db: Session, posiciones) -> int:
@@ -388,11 +403,12 @@ def crear_nivel(db: Session, data: NivelCreate) -> NivelResponse:
 def actualizar_nivel(db: Session, nivel_id: uuid.UUID, data: NivelUpdate) -> NivelResponse:
     n = obtener_nivel(db, nivel_id)
     cambios = data.model_dump(exclude_unset=True)
+    desc = describir_cambios(diff_cambios(n, cambios))
     for campo, valor in cambios.items():
         setattr(n, campo, valor)
     db.commit()
     db.refresh(n)
-    return _to_nivel_response(n, _conteo_libros_nivel(db, n.id))
+    return _stash_audit(_to_nivel_response(n, _conteo_libros_nivel(db, n.id)), desc)
 
 
 def eliminar_nivel(db: Session, nivel_id: uuid.UUID) -> None:
@@ -451,11 +467,12 @@ def actualizar_zona(db: Session, zona_id: uuid.UUID, data: ZonaUpdate) -> Zona:
         )
         if dup:
             raise ConflictError(f"Ya existe la zona '{cambios['nombre']}'")
+    desc = describir_cambios(diff_cambios(z, cambios))
     for campo, valor in cambios.items():
         setattr(z, campo, valor)
     db.commit()
     db.refresh(z)
-    return z
+    return _stash_audit(z, desc)
 
 
 def eliminar_zona(db: Session, zona_id: uuid.UUID) -> None:

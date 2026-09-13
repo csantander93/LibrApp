@@ -104,6 +104,48 @@ export interface Configuracion {
   isbn_obligatorio: boolean;
 }
 
+/** Respuesta paginada genérica del backend (Page[T]). */
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+/** Registro de acceso al sistema (intento de login, exitoso o fallido). */
+export interface LogAcceso {
+  id: string;
+  usuario_id: string | null;
+  username: string;
+  ip: string | null;
+  agente: string | null;
+  exito: boolean;
+  fecha: string;
+}
+
+/** Registro de una acción del panel (alta / edición / baja / importación). */
+export interface LogAccion {
+  id: string;
+  usuario_id: string | null;
+  usuario_nombre: string | null;
+  username: string | null;
+  detalle: string;
+  modulo: string | null;
+  accion: string | null;
+  ip: string | null;
+  fecha: string;
+}
+
+/** Filtros de los listados de logs (auditoría). */
+export interface LogsFilter {
+  desde?: string; // YYYY-MM-DD
+  hasta?: string; // YYYY-MM-DD
+  usuario?: string; // busca por username / nombre
+  page?: number;
+  size?: number;
+}
+
 /** Payload de alta/edición de un libro. */
 export interface LibroInput {
   titulo: string;
