@@ -1,16 +1,22 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
+import { cn } from "@/lib/utils";
 import type { Libro } from "@/shared/types";
 import { listarLibros, listarColecciones, listarEstantes, eliminarLibro } from "./api";
 import { LibroFormModal } from "./LibroFormModal";
+import { LibroDetalleModal } from "./LibroDetalleModal";
 
 const PAGE_SIZE = 15;
+
+/** Columnas ordenables del catálogo. */
+type CampoOrden = "titulo" | "autor" | "editorial" | "coleccion_nombre" | "estante_codigo" | "precio";
+type Orden = { campo: CampoOrden; dir: "asc" | "desc" };
 
 function formatearPrecio(precio: string | null): string {
   if (precio === null) return "—";
@@ -27,8 +33,10 @@ export function CatalogoPage() {
   const [estanteId, setEstanteId] = useState("");
   const [soloSinUbicar, setSoloSinUbicar] = useState(false);
   const [pagina, setPagina] = useState(1);
+  const [orden, setOrden] = useState<Orden | null>(null);
   const [modalAbierto, setModalAbierto] = useState(false);
   const [libroEdit, setLibroEdit] = useState<Libro | null>(null);
+  const [libroDetalle, setLibroDetalle] = useState<Libro | null>(null);
 
   const filtros = {
     q: q.trim().length >= 2 ? q.trim() : undefined,
@@ -56,12 +64,45 @@ export function CatalogoPage() {
       toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el libro"),
   });
 
-  const total = libros?.length ?? 0;
+  // Ordenamiento en 3 estados por columna (desc → asc → sin orden). Los nulos van al final.
+  const librosOrdenados = useMemo(() => {
+    const base = libros ?? [];
+    if (!orden) return base;
+    const { campo, dir } = orden;
+    const factor = dir === "asc" ? 1 : -1;
+    return [...base].sort((a, b) => {
+      if (campo === "precio") {
+        const va = a.precio === null ? null : Number(a.precio);
+        const vb = b.precio === null ? null : Number(b.precio);
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1;
+        if (vb === null) return -1;
+        return (va - vb) * factor;
+      }
+      const va = a[campo] ?? "";
+      const vb = b[campo] ?? "";
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return va.localeCompare(vb, "es", { sensitivity: "base" }) * factor;
+    });
+  }, [libros, orden]);
+
+  function ordenarPor(campo: CampoOrden) {
+    setPagina(1);
+    setOrden((prev) => {
+      if (!prev || prev.campo !== campo) return { campo, dir: "desc" };
+      if (prev.dir === "desc") return { campo, dir: "asc" };
+      return null; // asc → vuelve al orden original
+    });
+  }
+
+  const total = librosOrdenados.length;
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const paginaActual = Math.min(pagina, totalPaginas);
   const visibles = useMemo(
-    () => (libros ?? []).slice((paginaActual - 1) * PAGE_SIZE, paginaActual * PAGE_SIZE),
-    [libros, paginaActual],
+    () => librosOrdenados.slice((paginaActual - 1) * PAGE_SIZE, paginaActual * PAGE_SIZE),
+    [librosOrdenados, paginaActual],
   );
 
   function abrirAlta() {
@@ -72,6 +113,34 @@ export function CatalogoPage() {
     setLibroEdit(libro);
     setModalAbierto(true);
   }
+  function EncabezadoOrden({
+    campo,
+    children,
+    alinear = "left",
+  }: {
+    campo: CampoOrden;
+    children: React.ReactNode;
+    alinear?: "left" | "right";
+  }) {
+    const activo = orden?.campo === campo;
+    const Icono = !activo ? ArrowUpDown : orden!.dir === "desc" ? ArrowDown : ArrowUp;
+    return (
+      <th className={cn("px-4 py-3 font-medium", alinear === "right" && "text-right")}>
+        <button
+          type="button"
+          onClick={() => ordenarPor(campo)}
+          className={cn(
+            "inline-flex items-center gap-1 uppercase transition-colors hover:text-slate-700",
+            activo && "text-unla",
+          )}
+        >
+          {children}
+          <Icono className={cn("h-3.5 w-3.5", !activo && "text-slate-300")} />
+        </button>
+      </th>
+    );
+  }
+
   async function confirmarEliminar(libro: Libro) {
     const ok = await confirmar({
       mensaje: (
@@ -137,12 +206,12 @@ export function CatalogoPage() {
         <table className="w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-medium">Título</th>
-              <th className="px-4 py-3 font-medium">Autor</th>
-              <th className="px-4 py-3 font-medium">Editorial</th>
-              <th className="px-4 py-3 font-medium">Colección</th>
-              <th className="px-4 py-3 font-medium">Ubicación</th>
-              <th className="px-4 py-3 text-right font-medium">Precio</th>
+              <EncabezadoOrden campo="titulo">Título</EncabezadoOrden>
+              <EncabezadoOrden campo="autor">Autor</EncabezadoOrden>
+              <EncabezadoOrden campo="editorial">Editorial</EncabezadoOrden>
+              <EncabezadoOrden campo="coleccion_nombre">Colección</EncabezadoOrden>
+              <EncabezadoOrden campo="estante_codigo">Ubicación</EncabezadoOrden>
+              <EncabezadoOrden campo="precio" alinear="right">Precio</EncabezadoOrden>
               <th className="px-4 py-3 text-right font-medium">Acciones</th>
             </tr>
           </thead>
@@ -156,15 +225,24 @@ export function CatalogoPage() {
               <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Sin resultados.</td></tr>
             )}
             {visibles.map((libro) => (
-              <tr key={libro.id} className="hover:bg-slate-50">
+              <tr
+                key={libro.id}
+                className="cursor-pointer hover:bg-slate-50"
+                onClick={() => setLibroDetalle(libro)}
+              >
                 <td className="px-4 py-3 font-medium text-slate-900">{libro.titulo}</td>
                 <td className="px-4 py-3 text-slate-600">{libro.autor}</td>
                 <td className="px-4 py-3 text-slate-600">{libro.editorial}</td>
                 <td className="px-4 py-3 text-slate-600">{libro.coleccion_nombre ?? "—"}</td>
                 <td className="px-4 py-3">
                   {libro.estante_codigo ? (
-                    <span className="rounded-full bg-unla/10 px-2 py-0.5 text-xs font-medium text-unla">
-                      {libro.estante_codigo}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="rounded-full bg-unla/10 px-2 py-0.5 text-xs font-medium text-unla">
+                        {libro.estante_codigo}
+                      </span>
+                      {libro.nivel_numero !== null && (
+                        <span className="text-xs text-slate-500">Nivel {libro.nivel_numero}</span>
+                      )}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
@@ -176,14 +254,14 @@ export function CatalogoPage() {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <button
-                      onClick={() => abrirEdicion(libro)}
+                      onClick={(e) => { e.stopPropagation(); abrirEdicion(libro); }}
                       className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-unla"
                       title="Editar"
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => confirmarEliminar(libro)}
+                      onClick={(e) => { e.stopPropagation(); confirmarEliminar(libro); }}
                       className="rounded-lg p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
                       title="Eliminar"
                     >
@@ -211,6 +289,12 @@ export function CatalogoPage() {
           </div>
         </div>
       )}
+
+      <LibroDetalleModal
+        libro={libroDetalle}
+        onClose={() => setLibroDetalle(null)}
+        onEditar={(libro) => { setLibroDetalle(null); abrirEdicion(libro); }}
+      />
 
       <LibroFormModal
         abierto={modalAbierto}

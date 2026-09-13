@@ -1,12 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
+import { cn } from "@/lib/utils";
 import type { Estante } from "@/shared/types";
 import { listarEstantes, listarZonas, eliminarEstante } from "./api";
 import { EstanteFormModal } from "./EstanteFormModal";
+
+/** Columnas ordenables de estantes. */
+type CampoOrden = "codigo" | "etiqueta" | "zona" | "niveles" | "libros";
+type Orden = { campo: CampoOrden; dir: "asc" | "desc" };
 
 export function EstantesPage() {
   const qc = useQueryClient();
@@ -17,6 +22,7 @@ export function EstantesPage() {
 
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState<Estante | null>(null);
+  const [orden, setOrden] = useState<Orden | null>(null);
 
   const eliminar = useMutation({
     mutationFn: eliminarEstante,
@@ -31,6 +37,70 @@ export function EstantesPage() {
   });
 
   const nombreZona = (id: string | null) => zonas.find((z) => z.id === id)?.nombre ?? "—";
+
+  // Ordenamiento en 3 estados por columna (desc → asc → sin orden).
+  const estantesOrdenados = useMemo(() => {
+    const base = estantes ?? [];
+    if (!orden) return base;
+    const { campo, dir } = orden;
+    const factor = dir === "asc" ? 1 : -1;
+    return [...base].sort((a, b) => {
+      switch (campo) {
+        case "niveles":
+          return ((a.niveles?.length ?? 0) - (b.niveles?.length ?? 0)) * factor;
+        case "libros":
+          return (a.total_libros - b.total_libros) * factor;
+        case "zona":
+          return nombreZona(a.zona_id).localeCompare(nombreZona(b.zona_id), "es", { sensitivity: "base" }) * factor;
+        case "etiqueta": {
+          const va = a.etiqueta ?? "";
+          const vb = b.etiqueta ?? "";
+          if (!va && !vb) return 0;
+          if (!va) return 1;
+          if (!vb) return -1;
+          return va.localeCompare(vb, "es", { sensitivity: "base" }) * factor;
+        }
+        default:
+          return a.codigo.localeCompare(b.codigo, "es", { sensitivity: "base" }) * factor;
+      }
+    });
+  }, [estantes, zonas, orden]);
+
+  function ordenarPor(campo: CampoOrden) {
+    setOrden((prev) => {
+      if (!prev || prev.campo !== campo) return { campo, dir: "desc" };
+      if (prev.dir === "desc") return { campo, dir: "asc" };
+      return null; // asc → vuelve al orden original
+    });
+  }
+
+  function EncabezadoOrden({
+    campo,
+    children,
+    alinear = "left",
+  }: {
+    campo: CampoOrden;
+    children: React.ReactNode;
+    alinear?: "left" | "right";
+  }) {
+    const activo = orden?.campo === campo;
+    const Icono = !activo ? ArrowUpDown : orden!.dir === "desc" ? ArrowDown : ArrowUp;
+    return (
+      <th className={cn("px-4 py-3 font-medium", alinear === "right" && "text-right")}>
+        <button
+          type="button"
+          onClick={() => ordenarPor(campo)}
+          className={cn(
+            "inline-flex items-center gap-1 uppercase transition-colors hover:text-slate-700",
+            activo && "text-unla",
+          )}
+        >
+          {children}
+          <Icono className={cn("h-3.5 w-3.5", !activo && "text-slate-300")} />
+        </button>
+      </th>
+    );
+  }
 
   async function confirmarEliminar(e: Estante) {
     if (e.total_libros > 0) {
@@ -66,11 +136,11 @@ export function EstantesPage() {
         <table className="w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-medium">Código</th>
-              <th className="px-4 py-3 font-medium">Etiqueta</th>
-              <th className="px-4 py-3 font-medium">Zona</th>
-              <th className="px-4 py-3 text-right font-medium">Niveles</th>
-              <th className="px-4 py-3 text-right font-medium">Libros</th>
+              <EncabezadoOrden campo="codigo">Código</EncabezadoOrden>
+              <EncabezadoOrden campo="etiqueta">Etiqueta</EncabezadoOrden>
+              <EncabezadoOrden campo="zona">Zona</EncabezadoOrden>
+              <EncabezadoOrden campo="niveles" alinear="right">Niveles</EncabezadoOrden>
+              <EncabezadoOrden campo="libros" alinear="right">Libros</EncabezadoOrden>
               <th className="px-4 py-3 text-right font-medium">Acciones</th>
             </tr>
           </thead>
@@ -80,7 +150,7 @@ export function EstantesPage() {
                 <Loader2 className="mx-auto h-5 w-5 animate-spin" />
               </td></tr>
             )}
-            {estantes?.map((e) => (
+            {estantesOrdenados.map((e) => (
               <tr key={e.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-unla/10 px-2 py-0.5 text-xs font-medium text-unla">{e.codigo}</span>
