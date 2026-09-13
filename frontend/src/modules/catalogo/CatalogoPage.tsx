@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid, SlidersHorizontal } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
@@ -11,6 +11,7 @@ import type { Libro } from "@/shared/types";
 import { listarLibros, listarColecciones, listarEstantes, eliminarLibro, urlImagenLibro } from "./api";
 import { LibroFormModal } from "./LibroFormModal";
 import { LibroDetalleModal } from "./LibroDetalleModal";
+import { CamposLibroManager } from "./CamposLibroManager";
 
 const PAGE_SIZE = 15;
 
@@ -73,6 +74,7 @@ export function CatalogoPage() {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [libroEdit, setLibroEdit] = useState<Libro | null>(null);
   const [libroDetalle, setLibroDetalle] = useState<Libro | null>(null);
+  const [camposAbierto, setCamposAbierto] = useState(false);
 
   const filtros = {
     q: q.trim().length >= 2 ? q.trim() : undefined,
@@ -196,9 +198,14 @@ export function CatalogoPage() {
           <h1 className="font-serif text-2xl font-bold text-stone-900">Catálogo</h1>
           <p className="text-sm text-stone-500">{total} libro(s) en el inventario.</p>
         </div>
-        <Button onClick={abrirAlta}>
-          <Plus className="h-4 w-4" /> Nuevo libro
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setCamposAbierto(true)}>
+            <SlidersHorizontal className="h-4 w-4" /> Campos personalizados
+          </Button>
+          <Button onClick={abrirAlta}>
+            <Plus className="h-4 w-4" /> Nuevo libro
+          </Button>
+        </div>
       </header>
 
       {/* Filtros (RF-06 / RF-12) */}
@@ -451,6 +458,8 @@ export function CatalogoPage() {
         colecciones={colecciones}
         estantes={estantes}
       />
+
+      <CamposLibroManager abierto={camposAbierto} onClose={() => setCamposAbierto(false)} />
     </div>
   );
 }

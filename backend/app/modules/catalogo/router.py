@@ -13,6 +13,7 @@ from app.modules.catalogo.schemas import (
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
     LibroImagenResponse,
+    CampoLibroResponse, CampoLibroCreate, CampoLibroUpdate,
 )
 
 # Lectura: pública (RF-07). Escritura (ABM): protegida con require_admin (RN-05).
@@ -68,6 +69,13 @@ def listar_zonas(db: Session = Depends(get_db)):
 @router.get("/anotaciones", response_model=list[AnotacionResponse])
 def listar_anotaciones(db: Session = Depends(get_db)):
     return service.listar_anotaciones(db)
+
+
+# Campos personalizados: lectura pública (el form del admin y el detalle público
+# los necesitan para renderizar la ficha del libro).
+@router.get("/campos", response_model=list[CampoLibroResponse])
+def listar_campos(db: Session = Depends(get_db)):
+    return service.listar_campos(db)
 
 
 # Imagen de libro: lectura pública (RF-07) — se sirve el binario tal cual. Los ids
@@ -275,6 +283,30 @@ def crear_coleccion(data: ColeccionCreate, db: Session = Depends(get_db), audit:
     obj = service.crear_coleccion(db, data)
     audit.registrar_accion(f"Creó la colección '{obj.nombre}'", modulo=_MODULO, accion="Creación")
     return obj
+
+
+# ─── Escritura: Campos personalizados (dinámicos) de libros ───────────────────
+
+@router.post("/campos", response_model=CampoLibroResponse, status_code=status.HTTP_201_CREATED)
+def crear_campo(data: CampoLibroCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    obj = service.crear_campo(db, data)
+    audit.registrar_accion(f"Creó el campo personalizado '{obj.etiqueta}'", modulo=_MODULO, accion="Creación")
+    return obj
+
+
+@router.put("/campos/{campo_id}", response_model=CampoLibroResponse)
+def actualizar_campo(campo_id: uuid.UUID, data: CampoLibroUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    obj = service.actualizar_campo(db, campo_id, data)
+    audit.registrar_accion(_con_cambios(f"Editó el campo personalizado '{obj.etiqueta}'", obj), modulo=_MODULO, accion="Edición")
+    return obj
+
+
+@router.delete("/campos/{campo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_campo(campo_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    campo = service.obtener_campo(db, campo_id)
+    etiqueta = campo.etiqueta
+    service.eliminar_campo(db, campo_id)
+    audit.registrar_accion(f"Eliminó el campo personalizado '{etiqueta}'", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Importación (RF-05 / CU-04) ──────────────────────────────────────────────

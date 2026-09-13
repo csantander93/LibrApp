@@ -1,8 +1,15 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import String, Text, Integer, Numeric, ForeignKey, UniqueConstraint, LargeBinary
+from sqlalchemy import String, Text, Integer, Numeric, ForeignKey, UniqueConstraint, LargeBinary, Boolean
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.shared.models import Base, UUIDMixin, TimestampMixin
+
+
+# Tipos soportados por los campos personalizados (dinámicos) de libros.
+# El admin define campos extra (ver CampoLibro) sin tocar el esquema; los valores
+# viven en Libro.datos_extra (JSONB) validados contra estas definiciones.
+TIPOS_CAMPO = ("texto", "numero", "select", "booleano", "fecha")
 
 
 class Zona(UUIDMixin, TimestampMixin, Base):
@@ -130,6 +137,11 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     nivel_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("niveles.id", ondelete="SET NULL"), nullable=True,
     )
+    # Valores de los campos personalizados (dinámicos): {codigo_campo: valor}.
+    # Se validan contra las definiciones activas (CampoLibro) en el service.
+    datos_extra: Mapped[dict] = mapped_column(
+        JSONB, default=dict, nullable=False, server_default="{}",
+    )
 
     coleccion: Mapped["Coleccion | None"] = relationship(back_populates="libros")
     estante: Mapped["Estante | None"] = relationship(back_populates="libros")
@@ -161,3 +173,31 @@ class LibroImagen(UUIDMixin, TimestampMixin, Base):
     contenido: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
 
     libro: Mapped["Libro"] = relationship(back_populates="imagenes")
+
+
+class CampoLibro(UUIDMixin, TimestampMixin, Base):
+    """Definición de un campo personalizado (dinámico) para los libros.
+
+    Hace parametrizable la ficha del libro sin tocar el esquema: el admin define
+    qué campos extra existen (ej. 'Año de edición', 'Idioma', 'Tapa dura'), y el
+    frontend renderiza el formulario a partir de estas definiciones. Los valores
+    por libro viven en Libro.datos_extra (JSONB), indexados por `codigo`.
+
+    Alcance global: cada campo aplica a todos los libros (LibrApp no scopea por
+    colección). El binario de imágenes no se maneja acá (LibroImagen ya cubre eso),
+    por eso no existe el tipo 'imagen'.
+    """
+    __tablename__ = "campos_libro"
+    __table_args__ = (
+        UniqueConstraint("codigo", name="uq_campo_libro_codigo"),
+    )
+
+    # Clave usada en Libro.datos_extra. Autogenerada (slug) a partir de la etiqueta.
+    codigo: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    etiqueta: Mapped[str] = mapped_column(String(100), nullable=False)  # nombre visible
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)  # ver TIPOS_CAMPO
+    # Opciones para el tipo 'select' (lista de strings). Null para el resto.
+    opciones: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    requerido: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

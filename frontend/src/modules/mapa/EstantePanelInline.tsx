@@ -2,9 +2,20 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers } from "lucide-react";
 import { cn, colorLomo, altoLomo } from "@/lib/utils";
-import { listarLibros } from "@/modules/catalogo/api";
+import { listarLibros, listarCampos } from "@/modules/catalogo/api";
 import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
-import type { Estante, Libro, Zona } from "@/shared/types";
+import type { Estante, Libro, Zona, CampoLibro } from "@/shared/types";
+
+/** Formatea el valor de un campo personalizado según su tipo, para mostrarlo. */
+function formatearDato(campo: CampoLibro, valor: unknown): string {
+  if (valor === null || valor === undefined || valor === "") return "";
+  if (campo.tipo === "booleano") return valor ? "Sí" : "No";
+  if (campo.tipo === "fecha") {
+    const d = new Date(`${valor}T00:00:00`);
+    return isNaN(d.getTime()) ? String(valor) : d.toLocaleDateString("es-AR");
+  }
+  return String(valor);
+}
 
 interface Props {
   estante: Estante;
@@ -19,6 +30,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
     queryKey: ["libros", { estante_id: estante.id }],
     queryFn: () => listarLibros({ estante_id: estante.id }),
   });
+  const { data: campos = [] } = useQuery({ queryKey: ["campos-libro"], queryFn: listarCampos });
 
   const [orden, setOrden] = useState<string[]>([]);
   useEffect(() => { setOrden(libros.map((l) => l.id)); }, [libros]);
@@ -354,6 +366,24 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
               <p className="mt-1 text-stone-400">{selectedLibro.coleccion_nombre}</p>
             )}
           </div>
+
+          {/* Campos personalizados con valor (solo lectura). */}
+          {(() => {
+            const extra = campos
+              .map((c) => ({ campo: c, texto: formatearDato(c, (selectedLibro.datos_extra ?? {})[c.codigo]) }))
+              .filter((x) => x.texto !== "");
+            if (extra.length === 0) return null;
+            return (
+              <dl className="mt-2 space-y-1 border-t border-stone-100 pt-2 text-xs">
+                {extra.map(({ campo, texto }) => (
+                  <div key={campo.id} className="flex justify-between gap-2">
+                    <dt className="shrink-0 text-stone-400">{campo.etiqueta}</dt>
+                    <dd className="truncate text-right text-stone-600">{texto}</dd>
+                  </div>
+                ))}
+              </dl>
+            );
+          })()}
         </div>
       )}
     </div>

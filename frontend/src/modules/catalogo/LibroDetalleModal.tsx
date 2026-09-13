@@ -1,8 +1,21 @@
 import { Pencil, MapPinOff } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Button } from "@/shared/components/ui/Button";
 import { ImagenCarrusel } from "./ImagenCarrusel";
-import type { Libro } from "@/shared/types";
+import { listarCampos } from "./api";
+import type { Libro, CampoLibro } from "@/shared/types";
+
+/** Formatea el valor de un campo personalizado según su tipo, para mostrarlo. */
+function formatearDato(campo: CampoLibro, valor: unknown): string {
+  if (valor === null || valor === undefined || valor === "") return "—";
+  if (campo.tipo === "booleano") return valor ? "Sí" : "No";
+  if (campo.tipo === "fecha") {
+    const d = new Date(`${valor}T00:00:00`);
+    return isNaN(d.getTime()) ? String(valor) : d.toLocaleDateString("es-AR");
+  }
+  return String(valor);
+}
 
 function formatearPrecio(precio: string | null): string {
   if (precio === null) return "—";
@@ -26,7 +39,15 @@ interface Props {
 }
 
 export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
+  const { data: campos = [] } = useQuery({ queryKey: ["campos-libro"], queryFn: listarCampos });
   if (!libro) return null;
+
+  // Campos personalizados con valor cargado (respeta el orden de las definiciones).
+  const datosExtra = libro.datos_extra ?? {};
+  const camposConValor = campos.filter((c) => {
+    const v = datosExtra[c.codigo];
+    return v !== null && v !== undefined && v !== "";
+  });
 
   const ubicacion = libro.estante_codigo ? (
     <span className="inline-flex items-center gap-1.5">
@@ -65,6 +86,13 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
         <Campo etiqueta="Precio">
           <span className="tabular-nums">{formatearPrecio(libro.precio)}</span>
         </Campo>
+
+        {/* Campos personalizados (dinámicos) con valor. */}
+        {camposConValor.map((campo) => (
+          <Campo key={campo.id} etiqueta={campo.etiqueta}>
+            {formatearDato(campo, datosExtra[campo.codigo])}
+          </Campo>
+        ))}
       </dl>
 
       <div className="mt-6 flex justify-end gap-2">

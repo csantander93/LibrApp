@@ -1,15 +1,19 @@
+import re
 import uuid
+import unicodedata
+from datetime import date
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.catalogo.models import (
-    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen,
+    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen, CampoLibro,
 )
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, NivelResponse, LibroCreate, LibroUpdate,
     EstanteCreate, EstanteUpdate, ColeccionCreate, ZonaCreate, ZonaUpdate,
     NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate,
+    CampoLibroCreate, CampoLibroUpdate,
 )
 from app.modules.configuracion.service import obtener_configuracion
 from app.shared.exceptions import NotFoundError, ConflictError, ValidationError
@@ -94,6 +98,7 @@ def _to_libro_response(lb: Libro) -> LibroResponse:
         # La relación ya viene ordenada por `orden` (portada primero). El binario
         # es una columna diferida: acá solo se leen los ids, no se trae la imagen.
         imagenes=[img.id for img in lb.imagenes],
+        datos_extra=lb.datos_extra or {},
     )
 
 
@@ -175,6 +180,57 @@ def _resolver_nivel(db: Session, estante_id, nivel_id, nivel_explicito: bool):
     return nivel_id
 
 
+def _validar_datos_extra(db: Session, datos: dict | None) -> dict:
+    """Valida los valores de los campos personalizados contra sus definiciones
+    activas (CampoLibro). Devuelve el dict limpio, listo para persistir.
+
+    - Descarta claves sin definición activa (tolera campos borrados/desactivados,
+      así los libros viejos con ese dato no rompen ni lo re-guardan).
+    - Exige los campos `requerido` no vacíos (mismo criterio que el ISBN obligatorio).
+    - Verifica el tipo: numero→número, booleano→bool, fecha→ISO AAAA-MM-DD,
+      select→valor dentro de las opciones, texto→cadena.
+    """
+    datos = datos or {}
+    campos = db.query(CampoLibro).filter(CampoLibro.activo.is_(True)).all()
+    limpio: dict = {}
+    for campo in campos:
+        valor = datos.get(campo.codigo)
+        vacio = valor is None or (isinstance(valor, str) and valor.strip() == "")
+        if vacio:
+            if campo.requerido:
+                raise ValidationError(f"El campo '{campo.etiqueta}' es obligatorio")
+            continue
+        limpio[campo.codigo] = _validar_valor_campo(campo, valor)
+    return limpio
+
+
+def _validar_valor_campo(campo: CampoLibro, valor):
+    """Valida/normaliza un valor según el tipo del campo. Lanza ValidationError."""
+    if campo.tipo == "numero":
+        try:
+            return float(valor)
+        except (TypeError, ValueError):
+            raise ValidationError(f"El campo '{campo.etiqueta}' debe ser un número")
+    if campo.tipo == "booleano":
+        if isinstance(valor, bool):
+            return valor
+        if isinstance(valor, str):
+            return valor.strip().lower() in ("true", "1", "si", "sí")
+        raise ValidationError(f"El campo '{campo.etiqueta}' debe ser Sí/No")
+    if campo.tipo == "fecha":
+        try:
+            date.fromisoformat(str(valor))
+        except ValueError:
+            raise ValidationError(f"El campo '{campo.etiqueta}' debe ser una fecha válida (AAAA-MM-DD)")
+        return str(valor)
+    if campo.tipo == "select":
+        if valor not in (campo.opciones or []):
+            raise ValidationError(f"El valor de '{campo.etiqueta}' no es una opción válida")
+        return valor
+    # texto
+    return str(valor).strip()
+
+
 def obtener_libro(db: Session, libro_id: uuid.UUID) -> Libro:
     lb = db.get(Libro, libro_id)
     if not lb:
@@ -188,6 +244,7 @@ def crear_libro(db: Session, data: LibroCreate) -> LibroResponse:
     _validar_fk(db, data.coleccion_id, data.estante_id)
     payload = data.model_dump()
     payload["nivel_id"] = _resolver_nivel(db, data.estante_id, data.nivel_id, nivel_explicito=True)
+    payload["datos_extra"] = _validar_datos_extra(db, payload.get("datos_extra"))
     lb = Libro(**payload)
     db.add(lb)
     db.commit()
@@ -208,7 +265,11 @@ def actualizar_libro(db: Session, libro_id: uuid.UUID, data: LibroUpdate) -> Lib
     cambios["nivel_id"] = _resolver_nivel(
         db, estante_final, nivel_final, nivel_explicito="nivel_id" in cambios,
     )
-    desc = describir_cambios(diff_cambios(lb, cambios))
+    if "datos_extra" in cambios:
+        cambios["datos_extra"] = _validar_datos_extra(db, cambios["datos_extra"])
+    # `datos_extra` es un dict complejo: se excluye del detalle de auditoría (igual
+    # que los otros campos escalares, deja "qué cambió"; el JSONB no aporta al texto).
+    desc = describir_cambios(diff_cambios(lb, {k: v for k, v in cambios.items() if k != "datos_extra"}))
     for campo, valor in cambios.items():
         setattr(lb, campo, valor)
     db.commit()
@@ -592,3 +653,76 @@ def crear_coleccion(db: Session, data: ColeccionCreate) -> Coleccion:
     db.commit()
     db.refresh(col)
     return col
+
+
+# ─── Escritura: Campos personalizados (dinámicos) de libros ───────────────────
+
+def _slug(texto: str) -> str:
+    """Deriva un código estable a partir de una etiqueta: sin acentos, minúsculas,
+    espacios y símbolos → '_'. Ej: 'Año de edición' → 'ano_de_edicion'."""
+    base = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    base = re.sub(r"[^a-zA-Z0-9]+", "_", base).strip("_").lower()
+    return base or "campo"
+
+
+def _codigo_unico(db: Session, base: str) -> str:
+    """Garantiza unicidad del código agregando un sufijo numérico si ya existe."""
+    codigo = base
+    n = 2
+    while db.query(CampoLibro).filter(CampoLibro.codigo == codigo).first():
+        codigo = f"{base}_{n}"
+        n += 1
+    return codigo
+
+
+def listar_campos(db: Session) -> list[CampoLibro]:
+    return db.query(CampoLibro).order_by(CampoLibro.orden, CampoLibro.etiqueta).all()
+
+
+def obtener_campo(db: Session, campo_id: uuid.UUID) -> CampoLibro:
+    c = db.get(CampoLibro, campo_id)
+    if not c:
+        raise NotFoundError("Campo no encontrado")
+    return c
+
+
+def crear_campo(db: Session, data: CampoLibroCreate) -> CampoLibro:
+    codigo = _codigo_unico(db, _slug(data.etiqueta))
+    c = CampoLibro(
+        codigo=codigo,
+        etiqueta=data.etiqueta,
+        tipo=data.tipo,
+        opciones=data.opciones,
+        requerido=data.requerido,
+        orden=data.orden,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+def actualizar_campo(db: Session, campo_id: uuid.UUID, data: CampoLibroUpdate) -> CampoLibro:
+    c = obtener_campo(db, campo_id)
+    cambios = data.model_dump(exclude_unset=True)
+    # Estado final de tipo/opciones para validar la coherencia select↔opciones.
+    tipo_final = cambios.get("tipo", c.tipo)
+    opciones_final = cambios.get("opciones", c.opciones)
+    if tipo_final == "select" and not opciones_final:
+        raise ValidationError("Un campo de tipo selector necesita al menos una opción")
+    if tipo_final != "select":
+        cambios["opciones"] = None
+    desc = describir_cambios(diff_cambios(c, cambios))
+    for campo, valor in cambios.items():
+        setattr(c, campo, valor)
+    db.commit()
+    db.refresh(c)
+    return _stash_audit(c, desc)
+
+
+def eliminar_campo(db: Session, campo_id: uuid.UUID) -> None:
+    """Elimina la definición. Los valores ya guardados en Libro.datos_extra quedan
+    como datos huérfanos inertes: `_validar_datos_extra` los ignora al releer/editar."""
+    c = obtener_campo(db, campo_id)
+    db.delete(c)
+    db.commit()

@@ -6,8 +6,8 @@ import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
-import type { Libro, Coleccion, Estante, LibroInput } from "@/shared/types";
-import { crearLibro, actualizarLibro, subirImagenesLibro } from "./api";
+import type { Libro, Coleccion, Estante, LibroInput, CampoLibro } from "@/shared/types";
+import { crearLibro, actualizarLibro, subirImagenesLibro, listarCampos } from "./api";
 import { LibroImagenesEditor } from "./LibroImagenesEditor";
 import { obtenerConfiguracion } from "@/modules/configuracion/api";
 
@@ -29,6 +29,7 @@ function estadoInicial(libro: Libro | null): LibroInput {
     coleccion_id: libro?.coleccion_id ?? "",
     estante_id: libro?.estante_id ?? "",
     nivel_id: libro?.nivel_id ?? "",
+    datos_extra: { ...(libro?.datos_extra ?? {}) },
   };
 }
 
@@ -43,6 +44,10 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
   // ISBN obligatorio por defecto; el admin puede desactivarlo en Configuración.
   const { data: config } = useQuery({ queryKey: ["configuracion"], queryFn: obtenerConfiguracion });
   const isbnObligatorio = config?.isbn_obligatorio ?? true;
+
+  // Campos personalizados (dinámicos) activos, en orden. Se renderizan tras los fijos.
+  const { data: campos = [] } = useQuery({ queryKey: ["campos-libro"], queryFn: listarCampos });
+  const camposActivos = campos.filter((c) => c.activo);
 
   // Reinicia el form cuando cambia el libro objetivo (abrir alta vs edición).
   const [libroId, setLibroId] = useState<string | null>(libro?.id ?? null);
@@ -95,6 +100,10 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
   }
 
   const set = (campo: keyof LibroInput) => (v: string) => setForm((f) => ({ ...f, [campo]: v }));
+
+  // Setter para un campo personalizado (guarda en form.datos_extra por su código).
+  const setDato = (codigo: string, valor: unknown) =>
+    setForm((f) => ({ ...f, datos_extra: { ...f.datos_extra, [codigo]: valor } }));
 
   // Al cambiar de estante, resetear el nivel (los niveles dependen del estante).
   function setEstante(v: string) {
@@ -171,6 +180,16 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
           </Campo>
         )}
 
+        {/* Campos personalizados (dinámicos) definidos por el admin. */}
+        {camposActivos.map((campo) => (
+          <CampoDinamico
+            key={campo.id}
+            campo={campo}
+            valor={form.datos_extra[campo.codigo]}
+            onChange={(v) => setDato(campo.codigo, v)}
+          />
+        ))}
+
         <LibroImagenesEditor
           libroId={libro?.id ?? null}
           imagenesIniciales={libro?.imagenes ?? []}
@@ -198,5 +217,61 @@ function Campo({ label, children }: { label: string; children: React.ReactNode }
       <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
       {children}
     </div>
+  );
+}
+
+/** Control de un campo personalizado, según su tipo. */
+function CampoDinamico({
+  campo,
+  valor,
+  onChange,
+}: {
+  campo: CampoLibro;
+  valor: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const label = `${campo.etiqueta}${campo.requerido ? " *" : ""}`;
+
+  if (campo.tipo === "booleano") {
+    return (
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={valor === true}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        {label}
+      </label>
+    );
+  }
+
+  if (campo.tipo === "select") {
+    return (
+      <Campo label={label}>
+        <Select
+          value={typeof valor === "string" ? valor : ""}
+          onChange={(e) => onChange(e.target.value || null)}
+          required={campo.requerido}
+        >
+          <option value="">— Sin especificar —</option>
+          {(campo.opciones ?? []).map((op) => (
+            <option key={op} value={op}>{op}</option>
+          ))}
+        </Select>
+      </Campo>
+    );
+  }
+
+  const tipoInput = campo.tipo === "numero" ? "number" : campo.tipo === "fecha" ? "date" : "text";
+  return (
+    <Campo label={label}>
+      <Input
+        type={tipoInput}
+        step={campo.tipo === "numero" ? "any" : undefined}
+        value={valor == null ? "" : String(valor)}
+        onChange={(e) => onChange(e.target.value)}
+        required={campo.requerido}
+      />
+    </Campo>
   );
 }

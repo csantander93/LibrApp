@@ -17,11 +17,12 @@ export function Modal({ abierto, onClose, titulo, children, ancho = "max-w-lg" }
       onClick={onClose}
     >
       <div
-        className={`w-full ${ancho} overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl shadow-stone-900/20`}
+        className={`flex max-h-[90vh] w-full ${ancho} flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl shadow-stone-900/20`}
         onClick={(e) => e.stopPropagation()}
       >
         {titulo && (
-          <div className="flex items-center justify-between border-b border-stone-200 bg-papel/60 px-6 py-4">
+          // Encabezado fijo: la X de cierre queda siempre visible aunque el cuerpo scrollee.
+          <div className="flex shrink-0 items-center justify-between border-b border-stone-200 bg-papel/60 px-6 py-4">
             <h2 className="font-serif text-lg font-semibold text-stone-900">{titulo}</h2>
             <button
               onClick={onClose}
@@ -31,7 +32,9 @@ export function Modal({ abierto, onClose, titulo, children, ancho = "max-w-lg" }
             </button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        {/* Cuerpo con scroll propio: en formularios largos (nuevo libro, campos
+            personalizados) los botones de abajo quedan accesibles sin cortarse. */}
+        <div className="min-h-0 overflow-y-auto p-6">{children}</div>
       </div>
     </div>
   );

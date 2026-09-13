@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import type {
   Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
-  Anotacion, AnotacionTipo, LibroImagen,
+  Anotacion, AnotacionTipo, LibroImagen, CampoLibro, CampoLibroInput,
 } from "@/shared/types";
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -208,6 +208,27 @@ export async function guardarAnotaciones(anotaciones: AnotacionPosicion[]): Prom
 
 export async function eliminarAnotacion(id: string): Promise<void> {
   await api.delete(`/catalogo/anotaciones/${id}`);
+}
+
+// ─── Campos personalizados (dinámicos) de libros ──────────────────────────────
+
+export async function listarCampos(): Promise<CampoLibro[]> {
+  const { data } = await api.get<CampoLibro[]>("/catalogo/campos");
+  return data;
+}
+
+export async function crearCampo(input: CampoLibroInput): Promise<CampoLibro> {
+  const { data } = await api.post<CampoLibro>("/catalogo/campos", input);
+  return data;
+}
+
+export async function actualizarCampo(id: string, input: Partial<CampoLibroInput>): Promise<CampoLibro> {
+  const { data } = await api.put<CampoLibro>(`/catalogo/campos/${id}`, input);
+  return data;
+}
+
+export async function eliminarCampo(id: string): Promise<void> {
+  await api.delete(`/catalogo/campos/${id}`);
 }
 
 // ─── Colecciones (escritura) ──────────────────────────────────────────────────

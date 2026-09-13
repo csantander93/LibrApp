@@ -29,6 +29,35 @@ export interface Libro {
   coleccion_nombre: string | null;
   /** Ids de las imágenes ordenadas; la primera es la portada/principal. */
   imagenes: string[];
+  /** Valores de los campos personalizados: { codigo_campo: valor }. */
+  datos_extra: Record<string, unknown>;
+}
+
+/** Tipo de dato de un campo personalizado (dinámico) de libro. */
+export type TipoCampo = "texto" | "numero" | "select" | "booleano" | "fecha";
+
+/** Definición de un campo personalizado que se agrega a la ficha del libro. */
+export interface CampoLibro {
+  id: string;
+  /** Clave usada en Libro.datos_extra (autogenerada a partir de la etiqueta). */
+  codigo: string;
+  etiqueta: string;
+  tipo: TipoCampo;
+  /** Opciones del selector (solo para tipo "select"). */
+  opciones: string[] | null;
+  requerido: boolean;
+  orden: number;
+  activo: boolean;
+}
+
+/** Payload de alta/edición de un campo personalizado. */
+export interface CampoLibroInput {
+  etiqueta: string;
+  tipo: TipoCampo;
+  opciones?: string[] | null;
+  requerido?: boolean;
+  orden?: number;
+  activo?: boolean;
 }
 
 /** Metadatos de una imagen de libro (el binario se pide por su URL). */
@@ -165,4 +194,6 @@ export interface LibroInput {
   coleccion_id: string | null;
   estante_id: string | null;
   nivel_id: string | null;
+  /** Valores de los campos personalizados: { codigo_campo: valor }. */
+  datos_extra: Record<string, unknown>;
 }

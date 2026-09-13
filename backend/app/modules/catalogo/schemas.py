@@ -1,6 +1,8 @@
 import uuid
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
+from app.modules.catalogo.models import TIPOS_CAMPO
 
 
 # ─── Respuestas de lectura ────────────────────────────────────────────────────
@@ -99,6 +101,8 @@ class LibroResponse(BaseModel):
     coleccion_nombre: str | None = None
     # Ids de las imágenes ordenadas (la primera es la portada/principal).
     imagenes: list[uuid.UUID] = []
+    # Valores de los campos personalizados: {codigo_campo: valor}.
+    datos_extra: dict = {}
 
 
 # ─── Escritura: Libro (RF-04) ─────────────────────────────────────────────────
@@ -120,6 +124,9 @@ class LibroCreate(BaseModel):
     coleccion_id: uuid.UUID | None = None
     estante_id: uuid.UUID | None = None  # None = 'Sin ubicar' (RN-07)
     nivel_id: uuid.UUID | None = None
+    # Valores de los campos personalizados (dinámicos). El service los valida
+    # contra las definiciones activas (CampoLibro).
+    datos_extra: dict | None = None
 
     @field_validator("titulo", "autor", "editorial")
     @classmethod
@@ -145,6 +152,7 @@ class LibroUpdate(BaseModel):
     coleccion_id: uuid.UUID | None = None
     estante_id: uuid.UUID | None = None
     nivel_id: uuid.UUID | None = None
+    datos_extra: dict | None = None
 
     @field_validator("titulo", "autor", "editorial")
     @classmethod
@@ -322,6 +330,105 @@ class ColeccionCreate(BaseModel):
         if not v:
             raise ValueError("El nombre es obligatorio")
         return v
+
+
+# ─── Campos personalizados (dinámicos) de libros ──────────────────────────────
+
+def _normalizar_opciones(opciones: list[str] | None) -> list[str] | None:
+    """Limpia la lista de opciones de un select: descarta vacías, recorta espacios
+    y elimina duplicados conservando el orden."""
+    if opciones is None:
+        return None
+    vistas: list[str] = []
+    for op in opciones:
+        val = (op or "").strip()
+        if val and val not in vistas:
+            vistas.append(val)
+    return vistas
+
+
+class CampoLibroResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    codigo: str
+    etiqueta: str
+    tipo: str
+    opciones: list[str] | None = None
+    requerido: bool
+    orden: int
+    activo: bool
+
+
+class CampoLibroCreate(BaseModel):
+    etiqueta: str
+    tipo: str
+    opciones: list[str] | None = None
+    requerido: bool = False
+    orden: int = 0
+
+    @field_validator("etiqueta")
+    @classmethod
+    def _etiqueta_norm(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("La etiqueta es obligatoria")
+        return v
+
+    @field_validator("tipo")
+    @classmethod
+    def _tipo_valido(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in TIPOS_CAMPO:
+            raise ValueError(f"Tipo inválido. Debe ser uno de: {', '.join(TIPOS_CAMPO)}")
+        return v
+
+    @field_validator("opciones")
+    @classmethod
+    def _opciones_norm(cls, v: list[str] | None) -> list[str] | None:
+        return _normalizar_opciones(v)
+
+    @model_validator(mode="after")
+    def _select_requiere_opciones(self):
+        if self.tipo == "select" and not self.opciones:
+            raise ValueError("Un campo de tipo selector necesita al menos una opción")
+        # Las opciones solo tienen sentido para 'select'.
+        if self.tipo != "select":
+            self.opciones = None
+        return self
+
+
+class CampoLibroUpdate(BaseModel):
+    etiqueta: str | None = None
+    tipo: str | None = None
+    opciones: list[str] | None = None
+    requerido: bool | None = None
+    orden: int | None = None
+    activo: bool | None = None
+
+    @field_validator("etiqueta")
+    @classmethod
+    def _etiqueta_norm(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("La etiqueta no puede quedar vacía")
+        return v
+
+    @field_validator("tipo")
+    @classmethod
+    def _tipo_valido(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if v not in TIPOS_CAMPO:
+            raise ValueError(f"Tipo inválido. Debe ser uno de: {', '.join(TIPOS_CAMPO)}")
+        return v
+
+    @field_validator("opciones")
+    @classmethod
+    def _opciones_norm(cls, v: list[str] | None) -> list[str] | None:
+        return _normalizar_opciones(v)
 
 
 # ─── Importación (RF-05 / CU-04) ──────────────────────────────────────────────
