@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { PublicSearchPage } from "@/modules/public/PublicSearchPage";
 import { LoginPage } from "@/modules/auth/LoginPage";
 import { ProtectedRoute } from "@/shared/components/ProtectedRoute";
+import { RequierePermiso } from "@/shared/components/RequierePermiso";
 import { AdminLayout } from "@/shared/components/AdminLayout";
 import { DashboardPage } from "@/modules/dashboard/DashboardPage";
 import { CatalogoPage } from "@/modules/catalogo/CatalogoPage";
@@ -28,12 +29,19 @@ export function AppRoutes() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="catalogo" element={<CatalogoPage />} />
-        <Route path="estantes" element={<EstantesPage />} />
-        <Route path="mapa" element={<MapaEditorPage />} />
-        <Route path="importar" element={<ImportarPage />} />
-        <Route path="registros" element={<LogsPage />} />
-        <Route path="configuracion" element={<ConfiguracionPage />} />
+        <Route path="catalogo" element={<RequierePermiso permiso="catalogo.gestionar"><CatalogoPage /></RequierePermiso>} />
+        <Route path="estantes" element={<RequierePermiso permiso="estantes.gestionar"><EstantesPage /></RequierePermiso>} />
+        <Route path="mapa" element={<RequierePermiso permiso="mapa.gestionar"><MapaEditorPage /></RequierePermiso>} />
+        <Route path="importar" element={<RequierePermiso permiso="importar.ejecutar"><ImportarPage /></RequierePermiso>} />
+        <Route path="registros" element={<RequierePermiso permiso="registros.ver"><LogsPage /></RequierePermiso>} />
+        <Route
+          path="configuracion"
+          element={
+            <RequierePermiso permiso={["configuracion.editar", "usuarios.gestionar"]}>
+              <ConfiguracionPage />
+            </RequierePermiso>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -3,20 +3,25 @@ import { LayoutDashboard, BookOpen, Map, LibrarySquare, Upload, Settings, Scroll
 import { useAuth } from "@/modules/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
-// Navegación del panel.
+// Navegación del panel. `permiso` = permiso(s) que habilitan el ítem; el
+// Dashboard no lleva (visible para cualquier sesión). Configuración se muestra si
+// el usuario puede editar ajustes O administrar usuarios/roles.
 const nav = [
-  { to: "/admin", label: "Dashboard", icon: LayoutDashboard, enabled: true, end: true },
-  { to: "/admin/catalogo", label: "Catálogo", icon: BookOpen, enabled: true },
-  { to: "/admin/estantes", label: "Estantes", icon: LibrarySquare, enabled: true },
-  { to: "/admin/mapa", label: "Mapa", icon: Map, enabled: true },
-  { to: "/admin/importar", label: "Importar", icon: Upload, enabled: true },
-  { to: "/admin/registros", label: "Registros", icon: ScrollText, enabled: true },
-  { to: "/admin/configuracion", label: "Configuración", icon: Settings, enabled: true },
+  { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, permiso: [] as string[] },
+  { to: "/admin/catalogo", label: "Catálogo", icon: BookOpen, permiso: ["catalogo.gestionar"] },
+  { to: "/admin/estantes", label: "Estantes", icon: LibrarySquare, permiso: ["estantes.gestionar"] },
+  { to: "/admin/mapa", label: "Mapa", icon: Map, permiso: ["mapa.gestionar"] },
+  { to: "/admin/importar", label: "Importar", icon: Upload, permiso: ["importar.ejecutar"] },
+  { to: "/admin/registros", label: "Registros", icon: ScrollText, permiso: ["registros.ver"] },
+  { to: "/admin/configuracion", label: "Configuración", icon: Settings, permiso: ["configuracion.editar", "usuarios.gestionar"] },
 ];
 
 export function AdminLayout() {
-  const { usuario, logout } = useAuth();
+  const { usuario, logout, tienePermiso } = useAuth();
   const iniciales = (usuario?.nombre ?? usuario?.username ?? "?").slice(0, 2).toUpperCase();
+
+  // Solo se muestran los ítems para los que el usuario tiene permiso.
+  const visibles = nav.filter((n) => n.permiso.length === 0 || tienePermiso(...n.permiso));
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -38,46 +43,35 @@ export function AdminLayout() {
           <p className="px-3 pb-2 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
             Gestión
           </p>
-          {nav.map(({ to, label, icon: Icon, enabled, end }) =>
-            enabled ? (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  cn(
-                    "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                    isActive
-                      ? "bg-unla text-white shadow-md shadow-black/20"
-                      : "text-slate-300 hover:bg-white/5 hover:text-white",
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    {/* Indicador bordó del ítem activo */}
-                    <span
-                      className={cn(
-                        "absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-ambar transition-all",
-                        isActive ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <Icon className="h-[18px] w-[18px]" />
-                    {label}
-                  </>
-                )}
-              </NavLink>
-            ) : (
-              <span
-                key={to}
-                title="Disponible en próximas entregas"
-                className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600"
-              >
-                <Icon className="h-[18px] w-[18px]" />
-                {label}
-              </span>
-            ),
-          )}
+          {visibles.map(({ to, label, icon: Icon, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                cn(
+                  "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                  isActive
+                    ? "bg-unla text-white shadow-md shadow-black/20"
+                    : "text-slate-300 hover:bg-white/5 hover:text-white",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {/* Indicador bordó del ítem activo */}
+                  <span
+                    className={cn(
+                      "absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-ambar transition-all",
+                      isActive ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <Icon className="h-[18px] w-[18px]" />
+                  {label}
+                </>
+              )}
+            </NavLink>
+          ))}
         </nav>
 
         {/* Usuario */}

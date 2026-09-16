@@ -1,10 +1,52 @@
-export type Rol = "admin" | "publico";
-
 export interface Usuario {
   id: string;
   username: string;
   nombre: string | null;
-  rol: Rol;
+  activo: boolean;
+  /** Nombre del rol asignado (ej: "Administrador"). */
+  rol: string | null;
+  rol_id: string | null;
+  /** Permisos efectivos del usuario (claves del catálogo, comodín ya expandido). */
+  permisos: string[];
+}
+
+/** Un permiso del catálogo (para el editor de roles). */
+export interface PermisoInfo {
+  key: string;
+  etiqueta: string;
+  descripcion: string;
+  grupo: string;
+}
+
+/** Rol con sus permisos y la cantidad de usuarios que lo tienen asignado. */
+export interface Rol {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  permisos: string[];
+  es_sistema: boolean;
+  usuarios_count: number;
+}
+
+export interface RolInput {
+  nombre: string;
+  descripcion?: string | null;
+  permisos: string[];
+}
+
+export interface UsuarioCreateInput {
+  username: string;
+  nombre?: string | null;
+  password: string;
+  rol_id: string;
+  activo?: boolean;
+}
+
+export interface UsuarioUpdateInput {
+  nombre?: string | null;
+  password?: string | null;
+  rol_id?: string;
+  activo?: boolean;
 }
 
 export interface DashboardStats {

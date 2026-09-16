@@ -1,12 +1,66 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/shared/components/ui/Card";
 import { useToast } from "@/shared/components/ui/Toast";
+import { useAuth } from "@/modules/auth/AuthContext";
+import { UsuariosTab } from "@/modules/usuarios/UsuariosTab";
+import { RolesTab } from "@/modules/usuarios/RolesTab";
 import { cn } from "@/lib/utils";
 import type { Configuracion } from "@/shared/types";
 import { obtenerConfiguracion, actualizarConfiguracion } from "./api";
 
+type Tab = "general" | "usuarios" | "roles";
+
 export function ConfiguracionPage() {
+  const { tienePermiso } = useAuth();
+  const puedeGeneral = tienePermiso("configuracion.editar");
+  const puedeUsuarios = tienePermiso("usuarios.gestionar");
+
+  // Pestaña inicial: la primera a la que el usuario tenga acceso.
+  const [tab, setTab] = useState<Tab>(puedeGeneral ? "general" : "usuarios");
+
+  return (
+    <div>
+      <header className="mb-6">
+        <h1 className="font-serif text-3xl font-bold text-stone-900">Configuración</h1>
+        <p className="text-sm text-stone-500">Ajustes generales, usuarios y roles de la aplicación.</p>
+      </header>
+
+      <div className="mb-5 flex gap-1 border-b border-stone-200">
+        {puedeGeneral && (
+          <TabButton activo={tab === "general"} onClick={() => setTab("general")}>General</TabButton>
+        )}
+        {puedeUsuarios && (
+          <>
+            <TabButton activo={tab === "usuarios"} onClick={() => setTab("usuarios")}>Usuarios</TabButton>
+            <TabButton activo={tab === "roles"} onClick={() => setTab("roles")}>Roles</TabButton>
+          </>
+        )}
+      </div>
+
+      {tab === "general" && puedeGeneral && <GeneralTab />}
+      {tab === "usuarios" && puedeUsuarios && <UsuariosTab />}
+      {tab === "roles" && puedeUsuarios && <RolesTab />}
+    </div>
+  );
+}
+
+function TabButton({ activo, onClick, children }: { activo: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors",
+        activo ? "border-unla text-unla" : "border-transparent text-stone-500 hover:text-stone-800",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function GeneralTab() {
   const qc = useQueryClient();
   const toast = useToast();
   const { data, isLoading, isError } = useQuery({
@@ -25,11 +79,6 @@ export function ConfiguracionPage() {
 
   return (
     <div className="max-w-2xl">
-      <header className="mb-6">
-        <h1 className="font-serif text-3xl font-bold text-stone-900">Configuración</h1>
-        <p className="text-sm text-stone-500">Ajustes generales de la aplicación.</p>
-      </header>
-
       {isLoading && (
         <div className="flex items-center gap-2 text-slate-500">
           <Loader2 className="h-5 w-5 animate-spin" /> Cargando configuración…

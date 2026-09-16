@@ -1,9 +1,10 @@
 """Dependencias de autenticación/autorización.
 
 - get_current_user: valida el Bearer token y devuelve el Usuario.
-- require_admin:     exige rol admin (operaciones de escritura — RN-05).
-- AuditContext / get_audit_context: contexto de auditoría inyectable en cualquier
-  endpoint de escritura para dejar un log de acción en una sola línea.
+- require_permiso(*claves): exige que el rol del usuario cumpla al menos uno de
+  los permisos indicados (RN-05). Reemplaza al viejo `require_admin`.
+- audit_ctx(*claves): igual que require_permiso pero además arma el AuditContext
+  del request para dejar un log de acción en una sola línea. Se usa en escrituras.
 """
 from fastapi import Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.modules.auth.models import Usuario, RolEnum
+from app.modules.auth.models import Usuario
 from app.shared.exceptions import UnauthorizedError, ForbiddenError
 
 # auto_error=False: manejamos nosotros el 401 con mensaje en español.
@@ -40,10 +41,14 @@ def get_current_user(
     return user
 
 
-def require_admin(user: Usuario = Depends(get_current_user)) -> Usuario:
-    if user.rol != RolEnum.admin:
-        raise ForbiddenError("Se requiere rol administrador")
-    return user
+def require_permiso(*permisos: str):
+    """Fábrica de dependencia: exige que el usuario tenga al menos uno de los
+    permisos. Sin permisos, solo exige sesión válida (útil para lecturas)."""
+    def dependencia(user: Usuario = Depends(get_current_user)) -> Usuario:
+        if permisos and not user.tiene_permiso(*permisos):
+            raise ForbiddenError("No tenés permisos para esta operación")
+        return user
+    return dependencia
 
 
 # ─── Auditoría ────────────────────────────────────────────────────────────────
@@ -91,10 +96,13 @@ class AuditContext:
         )
 
 
-def get_audit_context(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_admin),
-) -> AuditContext:
-    """Arma el `AuditContext` del request (usuario admin + IP). Solo escrituras."""
-    return AuditContext(db=db, usuario=current_user, ip=get_client_ip(request))
+def audit_ctx(*permisos: str):
+    """Fábrica de dependencia: valida los permisos requeridos y arma el
+    AuditContext (usuario + IP) del request. Para endpoints de escritura."""
+    def dependencia(
+        request: Request,
+        db: Session = Depends(get_db),
+        current_user: Usuario = Depends(require_permiso(*permisos)),
+    ) -> AuditContext:
+        return AuditContext(db=db, usuario=current_user, ip=get_client_ip(request))
+    return dependencia

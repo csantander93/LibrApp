@@ -8,6 +8,7 @@ from app.modules.catalogo.router import router as catalogo_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.configuracion.router import router as configuracion_router
 from app.modules.auditoria.router import router as auditoria_router
+from app.modules.usuarios.router import router as usuarios_router
 
 settings = get_settings()
 
@@ -65,6 +66,7 @@ app.include_router(catalogo_router, prefix=API_PREFIX)
 app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(configuracion_router, prefix=API_PREFIX)
 app.include_router(auditoria_router, prefix=API_PREFIX)
+app.include_router(usuarios_router, prefix=API_PREFIX)
 
 
 @app.get("/health", tags=["Health"])

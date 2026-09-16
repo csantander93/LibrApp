@@ -54,7 +54,16 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 ### Backend (`backend/app`)
 - **Modular por feature**: `modules/<x>/{models,schemas,router,service}.py`. La lógica de
   negocio vive en `service.py`; el router es fino. Casi todo el dominio está en el módulo
-  `catalogo` (libros, estantes, zonas, colecciones, importador). Otros: `auth`, `dashboard`.
+  `catalogo` (libros, estantes, zonas, colecciones, importador). Otros: `auth`, `dashboard`,
+  `usuarios` (ABM de usuarios y roles), `configuracion`, `auditoria`.
+- **Autorización por permisos** (RF-08): los roles son dinámicos (tabla `roles`, columna
+  `permisos` JSONB) y cada usuario tiene un `rol_id`. El catálogo fijo de permisos vive en
+  `auth/permisos.py` (una clave por sección: `catalogo.gestionar`, `estantes.gestionar`,
+  `mapa.gestionar`, `importar.ejecutar`, `registros.ver`, `configuracion.editar`,
+  `usuarios.gestionar`; el comodín `"*"` = acceso total del rol de sistema "Administrador").
+  Las escrituras se protegen con `require_permiso(...)` / `audit_ctx(...)` de `core/deps.py`
+  (reemplazaron al viejo `require_admin`). El catálogo mezcla 3 secciones, por eso usa
+  `AUDIT`/`AUDIT_EST`/`AUDIT_MAPA`/`AUDIT_IMP` según el endpoint.
 - `core/`: `config` (Pydantic Settings, lee `.env`), `database` (engine/SessionLocal/`get_db`),
   `security` (JWT + bcrypt), `deps` (`get_current_user`, `require_admin`).
 - `shared/models.py`: `Base`, `UUIDMixin` (PK UUID generada en Python), `TimestampMixin`.
@@ -92,6 +101,7 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 | `/admin/estantes` | ABM de estantes (RF-02) |
 | `/admin/mapa` | Editor de mapa 2D con drag & resize (RF-01/RF-10/RF-11) |
 | `/admin/importar` | Importador Excel/CSV con dry-run (RF-05/CU-04) |
+| `/admin/configuracion` | Ajustes + pestañas **Usuarios** y **Roles** (RF-08); las pestañas se muestran según permiso |
 
 ## Reglas de negocio clave (implementadas — no romper)
 
@@ -103,13 +113,17 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 - **RN-07/RN-09**: `estante_id` nulo = "Sin ubicar"; el import deja así lo que no matchea estante.
 - **RN-08** (y análogo para zonas): no se puede eliminar un estante con libros, ni una zona
   con estantes (409 con mensaje explicativo).
+- **Usuarios/roles** (módulo `usuarios`, gating con `usuarios.gestionar`): username único;
+  no podés eliminar tu propia cuenta ni quitarte a vos mismo el permiso de gestión; siempre
+  debe quedar ≥1 usuario activo con `usuarios.gestionar`; el rol de sistema ("Administrador",
+  `es_sistema`) no se edita ni elimina; no se elimina un rol con usuarios asignados (409).
 
 ## Gotchas (aprendidos, ahorran tiempo)
 
 - **Orden de rutas**: las rutas "literales" que comparten prefijo con una `/{id}` deben
   declararse ANTES (ej: `PUT /catalogo/estantes/posiciones` va antes de `/estantes/{estante_id}`,
   y `PUT /catalogo/anotaciones/posiciones` antes de `/anotaciones/{anotacion_id}`; si no
-  "posiciones" se parsea como UUID → 422).
+  "posiciones" se parsea como UUID → 422). Ídem `GET /roles/permisos` va antes de `/roles/{id}`.
 - **Migrar ANTES de que recargue el seed**: al tocar un modelo, `uvicorn --reload` reinicia y el
   `lifespan` corre el seed, que consulta las columnas nuevas → si la migración aún no se aplicó,
   el arranque falla (`UndefinedColumn`). Aplicá `docker compose exec backend alembic upgrade head`

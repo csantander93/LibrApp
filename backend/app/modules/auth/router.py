@@ -32,11 +32,13 @@ def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
         db, username=user.username, ip=ip, agente=agente,
         usuario_id=user.id, exito=True,
     )
-    token = create_access_token(subject=user.username, extra={"rol": user.rol.value})
-    return TokenResponse(access_token=token, usuario=UsuarioResponse.model_validate(user))
+    token = create_access_token(
+        subject=user.username, extra={"rol": user.rol.nombre if user.rol else None},
+    )
+    return TokenResponse(access_token=token, usuario=UsuarioResponse.desde(user))
 
 
 @router.get("/me", response_model=UsuarioResponse)
 def me(user: Usuario = Depends(get_current_user)):
     """Devuelve el usuario del token (para rehidratar la sesión en el frontend)."""
-    return user
+    return UsuarioResponse.desde(user)

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_audit_context, AuditContext
+from app.core.deps import get_current_user, audit_ctx, AuditContext
 from app.modules.auth.models import Usuario
+from app.modules.auth import permisos as P
 from app.modules.configuracion import service
 from app.modules.configuracion.schemas import ConfiguracionResponse, ConfiguracionUpdate
 from app.shared.audit_utils import diff_cambios, describir_cambios
@@ -18,7 +19,7 @@ def obtener(db: Session = Depends(get_db), _: Usuario = Depends(get_current_user
 
 
 @router.put("", response_model=ConfiguracionResponse)
-def actualizar(data: ConfiguracionUpdate, db: Session = Depends(get_db), audit: AuditContext = Depends(get_audit_context)):
+def actualizar(data: ConfiguracionUpdate, db: Session = Depends(get_db), audit: AuditContext = Depends(audit_ctx(P.CONFIGURACION))):
     # Diff calculado ANTES de aplicar los cambios (compara la fila actual vs el payload).
     actual = service.obtener_configuracion(db)
     desc = describir_cambios(diff_cambios(actual, data.model_dump(exclude_unset=True)))

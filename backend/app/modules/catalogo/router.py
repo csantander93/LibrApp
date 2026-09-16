@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query, Response, statu
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_audit_context, AuditContext
+from app.core.deps import audit_ctx, AuditContext
+from app.modules.auth import permisos as P
 from app.modules.catalogo import service, importer
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, ColeccionResponse, ZonaResponse,
@@ -16,12 +17,16 @@ from app.modules.catalogo.schemas import (
     CampoLibroResponse, CampoLibroCreate, CampoLibroUpdate,
 )
 
-# Lectura: pública (RF-07). Escritura (ABM): protegida con require_admin (RN-05).
+# Lectura: pública (RF-07). Escritura (ABM): protegida por permiso de sección (RN-05).
 router = APIRouter(prefix="/catalogo", tags=["Catálogo"])
 
-# Contexto de auditoría (implica require_admin): inyectado en cada escritura para
-# dejar un log de acción en una sola línea (quién, qué, cuándo, desde qué IP).
-AUDIT = Depends(get_audit_context)
+# Contextos de auditoría por sección: cada uno exige el permiso correspondiente y
+# arma el log de acción en una sola línea (quién, qué, cuándo, desde qué IP).
+# Este router mezcla tres secciones del panel: catálogo, estantes y mapa.
+AUDIT = Depends(audit_ctx(P.CATALOGO))        # libros, colecciones, campos, imágenes
+AUDIT_EST = Depends(audit_ctx(P.ESTANTES))    # estantes, niveles, zonas
+AUDIT_MAPA = Depends(audit_ctx(P.MAPA))       # posiciones, anotaciones, orden de libros
+AUDIT_IMP = Depends(audit_ctx(P.IMPORTAR))    # importación Excel/CSV
 
 # Módulo con el que se etiquetan todas las acciones de este router en el log.
 _MODULO = "Catálogo"
@@ -95,7 +100,7 @@ def obtener_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db)):
 # Declarado ANTES de /libros/{libro_id} para que "orden" no se parsee como UUID
 # (guardado en lote del reordenamiento de lomos en el mapa — RF-01/RF-03).
 @router.put("/libros/orden")
-def guardar_orden_libros(data: LibrosOrdenUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def guardar_orden_libros(data: LibrosOrdenUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
     actualizados = service.actualizar_orden_libros(db, data.libros)
     audit.registrar_accion(
         f"Reordenó libros en el mapa ({actualizados})", modulo="Mapa", accion="Edición",
@@ -179,7 +184,7 @@ def eliminar_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db), audit: 
 # ─── Escritura: Estantes (RF-02) ──────────────────────────────────────────────
 
 @router.post("/estantes", response_model=EstanteResponse, status_code=status.HTTP_201_CREATED)
-def crear_estante(data: EstanteCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def crear_estante(data: EstanteCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     obj = service.crear_estante(db, data)
     audit.registrar_accion(f"Creó el estante '{obj.codigo}'", modulo=_MODULO, accion="Creación")
     return obj
@@ -188,7 +193,7 @@ def crear_estante(data: EstanteCreate, db: Session = Depends(get_db), audit: Aud
 # Declarado ANTES de /estantes/{estante_id} para que "posiciones" no se intente
 # parsear como UUID (RF-10 / CU-05: guardado en lote del drag & drop).
 @router.put("/estantes/posiciones")
-def guardar_posiciones(data: PosicionesUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def guardar_posiciones(data: PosicionesUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
     actualizados = service.actualizar_posiciones(db, data.posiciones)
     audit.registrar_accion(
         f"Guardó posiciones del mapa ({actualizados} estante(s))", modulo="Mapa", accion="Edición",
@@ -197,14 +202,14 @@ def guardar_posiciones(data: PosicionesUpdate, db: Session = Depends(get_db), au
 
 
 @router.put("/estantes/{estante_id}", response_model=EstanteResponse)
-def actualizar_estante(estante_id: uuid.UUID, data: EstanteUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def actualizar_estante(estante_id: uuid.UUID, data: EstanteUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     obj = service.actualizar_estante(db, estante_id, data)
     audit.registrar_accion(_con_cambios(f"Editó el estante '{obj.codigo}'", obj), modulo=_MODULO, accion="Edición")
     return obj
 
 
 @router.delete("/estantes/{estante_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_estante(estante_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def eliminar_estante(estante_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     estante = service.obtener_estante(db, estante_id)
     codigo = estante.codigo
     service.eliminar_estante(db, estante_id)
@@ -214,21 +219,21 @@ def eliminar_estante(estante_id: uuid.UUID, db: Session = Depends(get_db), audit
 # ─── Escritura: Niveles ("pisos" del estante — RF-02) ─────────────────────────
 
 @router.post("/niveles", response_model=NivelResponse, status_code=status.HTTP_201_CREATED)
-def crear_nivel(data: NivelCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def crear_nivel(data: NivelCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     obj = service.crear_nivel(db, data)
     audit.registrar_accion(f"Creó el nivel N.º {obj.numero}", modulo=_MODULO, accion="Creación")
     return obj
 
 
 @router.put("/niveles/{nivel_id}", response_model=NivelResponse)
-def actualizar_nivel(nivel_id: uuid.UUID, data: NivelUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def actualizar_nivel(nivel_id: uuid.UUID, data: NivelUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     obj = service.actualizar_nivel(db, nivel_id, data)
     audit.registrar_accion(_con_cambios(f"Editó el nivel N.º {obj.numero}", obj), modulo=_MODULO, accion="Edición")
     return obj
 
 
 @router.delete("/niveles/{nivel_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_nivel(nivel_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def eliminar_nivel(nivel_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     nivel = service.obtener_nivel(db, nivel_id)
     numero = nivel.numero
     service.eliminar_nivel(db, nivel_id)
@@ -238,7 +243,7 @@ def eliminar_nivel(nivel_id: uuid.UUID, db: Session = Depends(get_db), audit: Au
 # ─── Escritura: Anotaciones del mapa (flechas / textos) ───────────────────────
 
 @router.post("/anotaciones", response_model=AnotacionResponse, status_code=status.HTTP_201_CREATED)
-def crear_anotacion(data: AnotacionCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def crear_anotacion(data: AnotacionCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
     obj = service.crear_anotacion(db, data)
     etiqueta = obj.texto or obj.tipo
     audit.registrar_accion(f"Creó una anotación del mapa ('{etiqueta}')", modulo="Mapa", accion="Creación")
@@ -247,7 +252,7 @@ def crear_anotacion(data: AnotacionCreate, db: Session = Depends(get_db), audit:
 
 # Literal antes de /{anotacion_id} para que "posiciones" no se parsee como UUID.
 @router.put("/anotaciones/posiciones")
-def guardar_anotaciones(data: AnotacionesUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def guardar_anotaciones(data: AnotacionesUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
     actualizados = service.actualizar_anotaciones(db, data.anotaciones)
     audit.registrar_accion(
         f"Guardó anotaciones del mapa ({actualizados})", modulo="Mapa", accion="Edición",
@@ -256,7 +261,7 @@ def guardar_anotaciones(data: AnotacionesUpdate, db: Session = Depends(get_db), 
 
 
 @router.delete("/anotaciones/{anotacion_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_anotacion(anotacion_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def eliminar_anotacion(anotacion_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
     anotacion = service.obtener_anotacion(db, anotacion_id)
     etiqueta = anotacion.texto or anotacion.tipo
     service.eliminar_anotacion(db, anotacion_id)
@@ -266,21 +271,21 @@ def eliminar_anotacion(anotacion_id: uuid.UUID, db: Session = Depends(get_db), a
 # ─── Escritura: Zonas (RF-11) ─────────────────────────────────────────────────
 
 @router.post("/zonas", response_model=ZonaResponse, status_code=status.HTTP_201_CREATED)
-def crear_zona(data: ZonaCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def crear_zona(data: ZonaCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     obj = service.crear_zona(db, data)
     audit.registrar_accion(f"Creó la zona '{obj.nombre}'", modulo=_MODULO, accion="Creación")
     return obj
 
 
 @router.put("/zonas/{zona_id}", response_model=ZonaResponse)
-def actualizar_zona(zona_id: uuid.UUID, data: ZonaUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def actualizar_zona(zona_id: uuid.UUID, data: ZonaUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     obj = service.actualizar_zona(db, zona_id, data)
     audit.registrar_accion(_con_cambios(f"Editó la zona '{obj.nombre}'", obj), modulo=_MODULO, accion="Edición")
     return obj
 
 
 @router.delete("/zonas/{zona_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_zona(zona_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+def eliminar_zona(zona_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
     zona = service.obtener_zona(db, zona_id)
     nombre = zona.nombre
     service.eliminar_zona(db, zona_id)
@@ -327,7 +332,7 @@ async def importar_libros(
     archivo: UploadFile = File(...),
     dry_run: bool = Query(True, description="True = solo previsualiza (no persiste)."),
     db: Session = Depends(get_db),
-    audit: AuditContext = AUDIT,
+    audit: AuditContext = AUDIT_IMP,
 ):
     """Sube un .csv/.xlsx y lo importa. Con dry_run=true devuelve el reporte de
     lo que se haría sin guardar (preview); con dry_run=false persiste los cambios."""

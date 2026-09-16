@@ -15,7 +15,8 @@ from decimal import Decimal
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.security import hash_password
-from app.modules.auth.models import Usuario, RolEnum
+from app.modules.auth.models import Usuario, Rol
+from app.modules.auth.permisos import WILDCARD
 from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel
 
 settings = get_settings()
@@ -24,7 +25,8 @@ settings = get_settings()
 def bootstrap_dev() -> None:
     db = SessionLocal()
     try:
-        _seed_admin(db)
+        rol_admin = _seed_rol_admin(db)
+        _seed_admin(db, rol_admin)
         zona = _seed_zona(db)
         colecciones = _seed_colecciones(db)
         estantes = _seed_estantes(db, zona)
@@ -35,7 +37,24 @@ def bootstrap_dev() -> None:
         db.close()
 
 
-def _seed_admin(db) -> None:
+def _seed_rol_admin(db) -> Rol:
+    """Rol de sistema con acceso total (idempotente). La migración 0010 ya lo crea;
+    acá lo garantizamos también para bases sembradas fuera de esa ruta."""
+    rol = db.query(Rol).filter(Rol.nombre == "Administrador").first()
+    if not rol:
+        rol = Rol(
+            nombre="Administrador",
+            descripcion="Acceso total al sistema.",
+            permisos=[WILDCARD],
+            es_sistema=True,
+        )
+        db.add(rol)
+        db.flush()
+        print("[seed] Rol de sistema 'Administrador' creado.", flush=True)
+    return rol
+
+
+def _seed_admin(db, rol_admin: Rol) -> None:
     existe = db.query(Usuario).filter(Usuario.username == settings.ADMIN_USERNAME).first()
     if existe:
         return
@@ -43,7 +62,7 @@ def _seed_admin(db) -> None:
         username=settings.ADMIN_USERNAME,
         nombre="Administrador",
         password_hash=hash_password(settings.ADMIN_PASSWORD),
-        rol=RolEnum.admin,
+        rol_id=rol_admin.id,
         activo=True,
     ))
     db.flush()

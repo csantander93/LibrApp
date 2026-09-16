@@ -8,6 +8,8 @@ interface AuthState {
   cargando: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  /** True si el usuario tiene al menos uno de los permisos indicados. */
+  tienePermiso: (...permisos: string[]) => boolean;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -40,8 +42,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsuario(null);
   }
 
+  function tienePermiso(...permisos: string[]): boolean {
+    if (!usuario) return false;
+    if (permisos.length === 0) return true;
+    return permisos.some((p) => usuario.permisos.includes(p));
+  }
+
   return (
-    <AuthContext.Provider value={{ usuario, cargando, login, logout }}>
+    <AuthContext.Provider value={{ usuario, cargando, login, logout, tienePermiso }}>
       {children}
     </AuthContext.Provider>
   );
