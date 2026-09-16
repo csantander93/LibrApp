@@ -18,8 +18,15 @@ class Zona(UUIDMixin, TimestampMixin, Base):
 
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Textura del piso del plano en esta zona (ver TEXTURAS_PISO). Nulo = grilla por defecto.
+    textura: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     estantes: Mapped[list["Estante"]] = relationship(back_populates="zona")
+
+
+# Texturas de piso soportadas para el plano de cada zona (se aplican como clase CSS
+# en el front). Nulo/ausente ⇒ "grilla" por defecto.
+TEXTURAS_PISO = ("grilla", "parquet", "baldosa", "cemento", "madera")
 
 
 class Coleccion(UUIDMixin, TimestampMixin, Base):
@@ -90,12 +97,30 @@ class Nivel(UUIDMixin, TimestampMixin, Base):
     libros: Mapped[list["Libro"]] = relationship(back_populates="nivel")
 
 
-class AnotacionMapa(UUIDMixin, TimestampMixin, Base):
-    """Marca de referencia sobre el plano: flechas y textos que orientan al
-    visitante (ENTRADA, SALIDA, ESCALERA, VENTANA, etc.). No es un estante ni
-    guarda libros — sólo geometría y estilo sobre el mapa 2D.
+# Tipos de anotación/elemento decorativo que se pueden soltar sobre el plano.
+# Además de 'texto' y 'flecha' (señalética original), hay mobiliario, plantas y
+# estructura que el front dibuja como SVG esquemático (vista cenital). Todos
+# comparten la misma geometría (pos/ancho/alto/rotacion) y color.
+TIPOS_ANOTACION = (
+    # Señalética
+    "texto", "flecha", "flecha_doble", "ventana", "bano",
+    # Mobiliario
+    "mesa_redonda", "mesa_cuadrada", "mesa_rect", "silla", "sillon", "mostrador",
+    # Plantas y deco
+    "planta", "maceta", "alfombra",
+    # Estructura
+    "escalera", "columna", "pared", "puerta",
+)
 
-    tipo: 'texto' (etiqueta) | 'flecha' (indicador direccional, usa rotacion).
+
+class AnotacionMapa(UUIDMixin, TimestampMixin, Base):
+    """Marca de referencia o elemento decorativo sobre el plano: señalética
+    (flechas/textos: ENTRADA, ESCALERA, VENTANA…) y mobiliario esquemático
+    (mesas, sillas, plantas, estructura). No es un estante ni guarda libros —
+    sólo geometría y estilo sobre el mapa 2D.
+
+    tipo: uno de TIPOS_ANOTACION. 'texto' usa `texto`; el resto se dibuja por
+    su forma. Los direccionales (flecha…) usan `rotacion`.
     """
     __tablename__ = "anotaciones_mapa"
 
@@ -136,6 +161,12 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     # Nivel dentro del estante (RF-02). Nulo = ubicado en el estante sin nivel asignado.
     nivel_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("niveles.id", ondelete="SET NULL"), nullable=True,
+    )
+    # Orden manual del libro dentro de su nivel/estante (reordenamiento por drag &
+    # drop en el mapa). Menor = primero (izquierda). Se persiste en lote y el
+    # listado ordena por (orden, titulo) para mantener la secuencia elegida.
+    orden: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default="0",
     )
     # Valores de los campos personalizados (dinámicos): {codigo_campo: valor}.
     # Se validan contra las definiciones activas (CampoLibro) en el service.

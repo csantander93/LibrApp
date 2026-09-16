@@ -92,6 +92,7 @@ def _to_libro_response(lb: Libro) -> LibroResponse:
         id=lb.id, isbn=lb.isbn, titulo=lb.titulo, autor=lb.autor,
         editorial=lb.editorial, precio=lb.precio,
         coleccion_id=lb.coleccion_id, estante_id=lb.estante_id, nivel_id=lb.nivel_id,
+        orden=lb.orden,
         estante_codigo=lb.estante.codigo if lb.estante else None,
         nivel_numero=lb.nivel.numero if lb.nivel else None,
         coleccion_nombre=lb.coleccion.nombre if lb.coleccion else None,
@@ -128,7 +129,23 @@ def listar_libros(
         query = query.filter(Libro.nivel_id == nivel_id)
     if sin_ubicar is True:
         query = query.filter(Libro.estante_id.is_(None))
-    return [_to_libro_response(lb) for lb in query.order_by(Libro.titulo).all()]
+    # Orden manual primero (reordenamiento de lomos en el mapa), título como
+    # desempate estable.
+    return [_to_libro_response(lb) for lb in query.order_by(Libro.orden, Libro.titulo).all()]
+
+
+def actualizar_orden_libros(db: Session, items) -> int:
+    """Guarda en lote el orden manual de los libros (drag & drop de lomos en el
+    mapa — RF-01/RF-03). `items` trae {id, orden}; menor `orden` = primero."""
+    actualizados = 0
+    for item in items:
+        lb = db.get(Libro, item.id)
+        if not lb:
+            continue
+        lb.orden = item.orden
+        actualizados += 1
+    db.commit()
+    return actualizados
 
 
 # ─── Escritura: Libro ─────────────────────────────────────────────────────────
@@ -603,7 +620,7 @@ def crear_zona(db: Session, data: ZonaCreate) -> Zona:
     existe = db.query(Zona).filter(func.lower(Zona.nombre) == data.nombre.lower()).first()
     if existe:
         raise ConflictError(f"Ya existe la zona '{data.nombre}'")
-    z = Zona(nombre=data.nombre, orden=data.orden)
+    z = Zona(nombre=data.nombre, orden=data.orden, textura=data.textura)
     db.add(z)
     db.commit()
     db.refresh(z)

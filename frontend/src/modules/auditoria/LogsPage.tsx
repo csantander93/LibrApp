@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
-  ScrollText, Search, RefreshCw, ShieldCheck, ShieldAlert,
-  ChevronLeft, ChevronRight, Loader2,
+  ScrollText, Search, RefreshCw, ShieldCheck, ShieldAlert, Loader2,
 } from "lucide-react";
 import { Card } from "@/shared/components/ui/Card";
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
 import { Modal } from "@/shared/components/ui/Modal";
+import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 import { cn } from "@/lib/utils";
 import type { LogAccion, LogsFilter } from "@/shared/types";
 import { listarAccesos, listarAcciones } from "./api";
@@ -51,8 +51,6 @@ function AccionBadge({ accion }: { accion?: string | null }) {
     </span>
   );
 }
-
-const PAGE_SIZE = 20;
 
 export function LogsPage() {
   const [tab, setTab] = useState<Tab>("acciones");
@@ -108,6 +106,7 @@ function useLogFiltros() {
   const [hasta, setHasta] = useState("");
   const [usuario, setUsuario] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   // Filtros efectivamente aplicados (se congelan al presionar "Aplicar").
   const [aplicados, setAplicados] = useState<LogsFilter>({});
 
@@ -116,7 +115,12 @@ function useLogFiltros() {
     setAplicados({ desde: desde || undefined, hasta: hasta || undefined, usuario: usuario || undefined });
   };
 
-  return { desde, setDesde, hasta, setHasta, usuario, setUsuario, page, setPage, aplicados, aplicar };
+  const cambiarTamano = (n: number) => { setPageSize(n); setPage(1); };
+
+  return {
+    desde, setDesde, hasta, setHasta, usuario, setUsuario,
+    page, setPage, pageSize, cambiarTamano, aplicados, aplicar,
+  };
 }
 
 function Filtros({ f }: { f: ReturnType<typeof useLogFiltros> }) {
@@ -152,26 +156,6 @@ function Filtros({ f }: { f: ReturnType<typeof useLogFiltros> }) {
   );
 }
 
-function Paginacion({
-  page, pages, total, onPage,
-}: { page: number; pages: number; total: number; onPage: (p: number) => void }) {
-  if (total === 0) return null;
-  return (
-    <div className="mt-4 flex items-center justify-between text-sm text-stone-500">
-      <span>{total} registro{total === 1 ? "" : "s"}</span>
-      <div className="flex items-center gap-2">
-        <Button variant="outline" disabled={page <= 1} onClick={() => onPage(page - 1)} className="px-2.5 py-1.5">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="min-w-[5rem] text-center">Página {page} de {pages}</span>
-        <Button variant="outline" disabled={page >= pages} onClick={() => onPage(page + 1)} className="px-2.5 py-1.5">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function EstadoTabla({ loading, error, vacio, colSpan }: { loading: boolean; error: boolean; vacio: boolean; colSpan: number }) {
   let contenido: React.ReactNode = null;
   if (error) contenido = <span className="text-red-600">No se pudieron cargar los registros.</span>;
@@ -195,8 +179,8 @@ function AccionesTab() {
   const f = useLogFiltros();
   const [sel, setSel] = useState<LogAccion | null>(null);
   const { data, isLoading, isError, isFetching } = useQuery({
-    queryKey: ["logs", "acciones", f.aplicados, f.page],
-    queryFn: () => listarAcciones({ ...f.aplicados, page: f.page, size: PAGE_SIZE }),
+    queryKey: ["logs", "acciones", f.aplicados, f.page, f.pageSize],
+    queryFn: () => listarAcciones({ ...f.aplicados, page: f.page, size: f.pageSize }),
     placeholderData: keepPreviousData,
   });
   const items = data?.items ?? [];
@@ -254,7 +238,15 @@ function AccionesTab() {
           </table>
         </div>
       </Card>
-      <Paginacion page={f.page} pages={data?.pages ?? 1} total={data?.total ?? 0} onPage={f.setPage} />
+      <TablePagination
+        page={f.page}
+        pages={data?.pages ?? 1}
+        total={data?.total ?? 0}
+        pageSize={f.pageSize}
+        onPage={f.setPage}
+        onPageSize={f.cambiarTamano}
+        unidad="registro"
+      />
       {isFetching && !isLoading && <p className="mt-2 text-xs text-stone-400">Actualizando…</p>}
 
       <AccionDetalleModal log={sel} onClose={() => setSel(null)} />
@@ -322,8 +314,8 @@ function Campo({ label, valor, mono }: { label: string; valor?: string | null; m
 function AccesosTab() {
   const f = useLogFiltros();
   const { data, isLoading, isError, isFetching } = useQuery({
-    queryKey: ["logs", "accesos", f.aplicados, f.page],
-    queryFn: () => listarAccesos({ ...f.aplicados, page: f.page, size: PAGE_SIZE }),
+    queryKey: ["logs", "accesos", f.aplicados, f.page, f.pageSize],
+    queryFn: () => listarAccesos({ ...f.aplicados, page: f.page, size: f.pageSize }),
     placeholderData: keepPreviousData,
   });
   const items = data?.items ?? [];
@@ -370,7 +362,15 @@ function AccesosTab() {
           </table>
         </div>
       </Card>
-      <Paginacion page={f.page} pages={data?.pages ?? 1} total={data?.total ?? 0} onPage={f.setPage} />
+      <TablePagination
+        page={f.page}
+        pages={data?.pages ?? 1}
+        total={data?.total ?? 0}
+        pageSize={f.pageSize}
+        onPage={f.setPage}
+        onPageSize={f.cambiarTamano}
+        unidad="registro"
+      />
       {isFetching && !isLoading && <p className="mt-2 text-xs text-stone-400">Actualizando…</p>}
     </>
   );

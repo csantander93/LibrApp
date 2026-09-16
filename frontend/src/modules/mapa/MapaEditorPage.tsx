@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Save, Plus, Trash2, Loader2, Info, Layers,
-  Type, ArrowRight, RotateCcw, RotateCw, Copy, ChevronUp,
+  Shapes, RotateCcw, RotateCw, Copy, ChevronUp,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
@@ -24,6 +24,7 @@ import { EstanteFormModal, siguienteCodigoEstante } from "@/modules/catalogo/Est
 import { MapaCanvas } from "./MapaCanvas";
 import { EstantePanelInline } from "./EstantePanelInline";
 import { ZonasModal } from "./ZonasModal";
+import { PaletaElementos, defaultsElemento, etiquetaTipo, iconoTipo } from "./elementos";
 
 export function MapaEditorPage() {
   const qc = useQueryClient();
@@ -41,13 +42,9 @@ export function MapaEditorPage() {
   const [selAnotId, setSelAnotId] = useState<string | null>(null);
   const [zonasModal, setZonasModal] = useState(false);
   const [estanteModal, setEstanteModal] = useState(false);
+  const [paletaAbierta, setPaletaAbierta] = useState(false);
   const [copiedEst, setCopiedEst] = useState<Estante | null>(null);
-
-  // Refs para que el keyboard handler siempre vea los valores más recientes.
-  const selEstRef = useRef<Estante | null>(null);
-  const copiedEstRef = useRef<Estante | null>(null);
-  const zonaIdRef = useRef<string>("");
-  const localEstRef = useRef<Estante[]>([]);
+  const [copiedAnot, setCopiedAnot] = useState<Anotacion | null>(null);
 
   // Sincroniza copias locales desde el server salvo que haya cambios sin guardar.
   useEffect(() => {
@@ -62,59 +59,7 @@ export function MapaEditorPage() {
     if (!zonaId || !zonas.some((z) => z.id === zonaId)) setZonaId(zonas[0].id);
   }, [zonas, zonaId]);
 
-  // Mantener refs actualizados para el keyboard handler.
   const selEstante = localEst.find((e) => e.id === selEstId) ?? null;
-  useEffect(() => { selEstRef.current = selEstante; }, [selEstante]);
-  useEffect(() => { copiedEstRef.current = copiedEst; }, [copiedEst]);
-  useEffect(() => { zonaIdRef.current = zonaId; }, [zonaId]);
-  useEffect(() => { localEstRef.current = localEst; }, [localEst]);
-
-  // Ctrl+C: copiar estante seleccionado | Ctrl+V: pegar (crea uno nuevo vacío).
-  useEffect(() => {
-    async function onKey(e: KeyboardEvent) {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      if (e.key === "c" && selEstRef.current) {
-        e.preventDefault();
-        setCopiedEst(selEstRef.current);
-      } else if (e.key === "v" && copiedEstRef.current) {
-        e.preventDefault();
-        const src = copiedEstRef.current;
-        // Código autogenerado (E{n}) para no depender de un prompt del navegador.
-        const codigo = siguienteCodigoEstante(localEstRef.current);
-        try {
-          const nuevo = await crearEstante({
-            codigo,
-            etiqueta: src.etiqueta,
-            zona_id: (src.zona_id ?? zonaIdRef.current) || null,
-            cantidad_niveles: src.niveles?.length || 1,
-          });
-          const patched: Estante = {
-            ...nuevo,
-            color: src.color,
-            pos_x: Math.min(src.pos_x + 5, 90),
-            pos_y: Math.min(src.pos_y + 5, 90),
-            ancho: src.ancho,
-            alto: src.alto,
-            rotacion: src.rotacion ?? 0,
-          };
-          setLocalEst((prev) => [...prev, patched]);
-          setSelEstId(nuevo.id);
-          setSelAnotId(null);
-          setDirty(true);
-          qc.invalidateQueries({ queryKey: ["estantes"] });
-          toast.success(`Estante ${codigo} pegado`);
-        } catch (err: any) {
-          toast.error(err?.response?.data?.detail ?? "No se pudo pegar el estante");
-        }
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const estVisibles = useMemo(
     () => localEst.filter((e) => (zonaId ? e.zona_id === zonaId : true)),
@@ -126,6 +71,7 @@ export function MapaEditorPage() {
   );
 
   const selAnot = localAnot.find((a) => a.id === selAnotId) ?? null;
+  const zonaActual = zonas.find((z) => z.id === zonaId) ?? null;
 
   // ── Guardado en lote (estantes + anotaciones) ───────────────────────────────
   const guardar = useMutation({
@@ -207,20 +153,23 @@ export function MapaEditorPage() {
 
   // ── Alta / baja de anotaciones ──────────────────────────────────────────────
   const agregarAnot = useMutation({
-    mutationFn: (tipo: AnotacionTipo) =>
-      crearAnotacion({
+    mutationFn: (tipo: AnotacionTipo) => {
+      const d = defaultsElemento(tipo);
+      return crearAnotacion({
         tipo, zona_id: zonaId || null,
-        texto: tipo === "texto" ? "NUEVO TEXTO" : null,
-        pos_x: 42, pos_y: 44, ancho: tipo === "flecha" ? 14 : 18, alto: 6,
-        color: "#7A1C30",
-      }),
+        texto: d.texto,
+        pos_x: 42, pos_y: 44, ancho: d.ancho, alto: d.alto,
+        color: d.color,
+      });
+    },
     onSuccess: (nueva) => {
       setLocalAnot((prev) => [...prev, nueva]);
       setSelAnotId(nueva.id);
       setSelEstId(null);
+      setPaletaAbierta(false);
       qc.invalidateQueries({ queryKey: ["anotaciones"] });
     },
-    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo crear la anotación"),
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo crear el elemento"),
   });
 
   const eliminarAnot = useMutation({
@@ -273,14 +222,99 @@ export function MapaEditorPage() {
     if (ok) eliminarEst.mutate(selEstante.id);
   }
 
+  // ── Copiar / pegar (Ctrl+C / Ctrl+V) y borrar (Delete) ──────────────────────
+  async function pegarEstante(src: Estante) {
+    // Código autogenerado (E{n}) para no depender de un prompt del navegador.
+    const codigo = siguienteCodigoEstante(localEst);
+    try {
+      const nuevo = await crearEstante({
+        codigo,
+        etiqueta: src.etiqueta,
+        zona_id: (src.zona_id ?? zonaId) || null,
+        cantidad_niveles: src.niveles?.length || 1,
+      });
+      const patched: Estante = {
+        ...nuevo,
+        color: src.color,
+        pos_x: Math.min(src.pos_x + 5, 90),
+        pos_y: Math.min(src.pos_y + 5, 90),
+        ancho: src.ancho,
+        alto: src.alto,
+        rotacion: src.rotacion ?? 0,
+      };
+      setLocalEst((prev) => [...prev, patched]);
+      setSelEstId(nuevo.id);
+      setSelAnotId(null);
+      setDirty(true);
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success(`Estante ${codigo} pegado`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "No se pudo pegar el estante");
+    }
+  }
+
+  async function pegarAnotacion(src: Anotacion) {
+    try {
+      const nueva = await crearAnotacion({
+        tipo: src.tipo,
+        zona_id: zonaId || null,
+        texto: src.texto,
+        pos_x: Math.min(src.pos_x + 5, 95),
+        pos_y: Math.min(src.pos_y + 5, 95),
+        ancho: src.ancho,
+        alto: src.alto,
+        rotacion: src.rotacion,
+        color: src.color,
+      });
+      setLocalAnot((prev) => [...prev, nueva]);
+      setSelAnotId(nueva.id);
+      setSelEstId(null);
+      qc.invalidateQueries({ queryKey: ["anotaciones"] });
+      toast.success(`${etiquetaTipo(src.tipo)} pegado`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "No se pudo pegar el elemento");
+    }
+  }
+
+  // Un único listener que delega en la última versión del handler (ve el estado
+  // fresco de cada render sin re-suscribir el evento).
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  onKeyRef.current = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    // Borrar el elemento seleccionado.
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (selEstante) { e.preventDefault(); void eliminarEstanteSel(); }
+      else if (selAnot) { e.preventDefault(); eliminarAnot.mutate(selAnot.id); }
+      return;
+    }
+
+    if (!(e.ctrlKey || e.metaKey)) return;
+
+    if (e.key === "c") {
+      if (selEstante) { e.preventDefault(); setCopiedEst(selEstante); setCopiedAnot(null); }
+      else if (selAnot) { e.preventDefault(); setCopiedAnot(selAnot); setCopiedEst(null); }
+    } else if (e.key === "v") {
+      if (copiedEst) { e.preventDefault(); void pegarEstante(copiedEst); }
+      else if (copiedAnot) { e.preventDefault(); void pegarAnotacion(copiedAnot); }
+    }
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKeyRef.current(e);
+    document.addEventListener("keydown", listener);
+    return () => document.removeEventListener("keydown", listener);
+  }, []);
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden">
       <header className="mb-2 shrink-0 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <h1 className="font-serif text-lg font-bold text-stone-900">Editor de mapa</h1>
-          {copiedEst && (
+          {(copiedEst || copiedAnot) && (
             <span className="flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500">
-              <Copy className="h-3 w-3" /> {copiedEst.codigo} copiado — Ctrl+V para pegar
+              <Copy className="h-3 w-3" />
+              {copiedEst ? `Estante ${copiedEst.codigo}` : etiquetaTipo(copiedAnot!.tipo)} copiado — Ctrl+V para pegar
             </span>
           )}
         </div>
@@ -296,12 +330,19 @@ export function MapaEditorPage() {
           <Button variant="outline" className="px-2.5 py-1 text-xs" onClick={agregarEstante}>
             <Plus className="h-3.5 w-3.5" /> Estante
           </Button>
-          <Button variant="outline" className="px-2.5 py-1 text-xs" onClick={() => agregarAnot.mutate("texto")}>
-            <Type className="h-3.5 w-3.5" /> Texto
-          </Button>
-          <Button variant="outline" className="px-2.5 py-1 text-xs" onClick={() => agregarAnot.mutate("flecha")}>
-            <ArrowRight className="h-3.5 w-3.5" /> Flecha
-          </Button>
+          <div className="relative">
+            <Button variant="outline" className="px-2.5 py-1 text-xs" onClick={() => setPaletaAbierta((v) => !v)}>
+              <Shapes className="h-3.5 w-3.5" /> Elemento
+            </Button>
+            {paletaAbierta && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setPaletaAbierta(false)} />
+                <div className="absolute right-0 top-full z-30 mt-1 rounded-xl border border-stone-200 bg-white p-3 shadow-lg shadow-stone-900/10">
+                  <PaletaElementos onElegir={(tipo) => agregarAnot.mutate(tipo)} />
+                </div>
+              </>
+            )}
+          </div>
           <Button className="px-2.5 py-1 text-xs" onClick={() => guardar.mutate()} disabled={!dirty || guardar.isPending}>
             {guardar.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
             Guardar
@@ -327,6 +368,7 @@ export function MapaEditorPage() {
                 <MapaCanvas
                   estantes={estVisibles}
                   anotaciones={anotVisibles}
+                  textura={zonaActual?.textura ?? null}
                   modo="editar"
                   seleccionadoId={selEstId}
                   seleccionadoAnotId={selAnotId}
@@ -347,6 +389,7 @@ export function MapaEditorPage() {
                     estante={selEstante}
                     zonas={zonas}
                     onCerrar={() => setSelEstId(null)}
+                    permitirReordenar
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-stone-200 bg-stone-50/60 text-xs text-stone-400">
@@ -460,10 +503,10 @@ export function MapaEditorPage() {
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="inline-flex items-center gap-1 rounded-full bg-stone-800 px-2 py-0.5 text-xs font-semibold text-white">
-                  {selAnot.tipo === "flecha" ? <ArrowRight className="h-3 w-3" /> : <Type className="h-3 w-3" />}
-                  {selAnot.tipo === "flecha" ? "Flecha" : "Texto"}
+                  {(() => { const I = iconoTipo(selAnot.tipo); return <I className="h-3 w-3" />; })()}
+                  {etiquetaTipo(selAnot.tipo)}
                 </span>
-                <span className="text-[10px] text-stone-400">Anotación</span>
+                <span className="text-[10px] text-stone-400">Elemento</span>
               </div>
 
               {selAnot.tipo === "texto" && (
@@ -500,7 +543,7 @@ export function MapaEditorPage() {
               </div>
 
               <p className="mt-2 text-[10px] text-stone-400">
-                Arrastrá para mover; esquina redimensiona.
+                Arrastrá para mover; esquina redimensiona. <span className="font-medium">Ctrl+C</span>/<span className="font-medium">Ctrl+V</span> copia · <span className="font-medium">Del</span> borra.
               </p>
 
               <Button
@@ -519,10 +562,10 @@ export function MapaEditorPage() {
             </div>
           ) : (
             <div className="text-xs text-stone-400">
-              <p>Seleccioná un estante o anotación para editarlo.</p>
+              <p>Seleccioná un estante o elemento para editarlo.</p>
               <p className="mt-2">
-                Usá <span className="font-semibold text-stone-500">Texto</span> y{" "}
-                <span className="font-semibold text-stone-500">Flecha</span> para señalizar entrada, salida, escaleras.
+                Usá <span className="font-semibold text-stone-500">Elemento</span> para sumar mobiliario
+                (mesas, sillas), plantas, señalética (flechas, textos) y estructura al plano.
               </p>
             </div>
           )}

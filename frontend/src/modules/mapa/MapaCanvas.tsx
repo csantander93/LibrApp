@@ -1,11 +1,14 @@
 import { useRef, type PointerEvent } from "react";
 import { Pencil, Plus, RotateCw } from "lucide-react";
 import { cn, colorEstante, oscurecer } from "@/lib/utils";
-import type { Estante, Anotacion } from "@/shared/types";
+import type { Estante, Anotacion, TexturaPiso } from "@/shared/types";
+import { renderElemento, claseTextura } from "./elementos";
 
 interface Props {
   estantes: Estante[];
   anotaciones?: Anotacion[];
+  /** Textura del piso de la zona visible (grilla si null). */
+  textura?: TexturaPiso | null;
   modo?: "ver" | "editar";
   seleccionadoId?: string | null;
   seleccionadoAnotId?: string | null;
@@ -51,17 +54,8 @@ function CtrlBtn({ label, onClick, children }: { label: string; onClick?: () => 
   );
 }
 
-function Flecha({ color }: { color: string }) {
-  return (
-    <div className="flex h-full w-full items-center" style={{ color }}>
-      <div className="h-[4px] flex-1 rounded-full" style={{ background: color }} />
-      <div style={{ width: 0, height: 0, borderTop: "9px solid transparent", borderBottom: "9px solid transparent", borderLeft: `15px solid ${color}` }} />
-    </div>
-  );
-}
-
 export function MapaCanvas({
-  estantes, anotaciones = [], modo = "ver",
+  estantes, anotaciones = [], textura, modo = "ver",
   seleccionadoId, seleccionadoAnotId, resaltados,
   onSeleccionar, onSeleccionarAnotacion, onMover, onResize, onRotar,
   onMoverAnotacion, onResizeAnotacion, onRotarAnotacion, onEditar, onAgregar,
@@ -191,7 +185,7 @@ export function MapaCanvas({
   return (
     <div className="relative h-full w-full">
       <div className="h-full w-full overflow-hidden rounded-2xl border border-stone-300/80 shadow-inner shadow-stone-900/10">
-        <div ref={canvasRef} className="map-floor relative h-full w-full">
+        <div ref={canvasRef} className={cn("map-floor relative h-full w-full", claseTextura(textura))}>
           <div className="pointer-events-none absolute inset-2 z-0 rounded border-[2.5px] border-stone-400/70" />
 
           {estantes.length === 0 && anotaciones.length === 0 && (
@@ -202,7 +196,6 @@ export function MapaCanvas({
 
           {anotaciones.map((a) => {
             const sel = seleccionadoAnotId === a.id;
-            const color = a.color ?? "#7A1C30";
             return (
               <div
                 key={a.id}
@@ -220,16 +213,7 @@ export function MapaCanvas({
                   transform: `rotate(${a.rotacion}deg)`,
                 }}
               >
-                {a.tipo === "flecha" ? (
-                  <Flecha color={color} />
-                ) : (
-                  <div
-                    className="flex h-full w-full items-center justify-center rounded-md border-2 border-dashed bg-white/75 px-1 text-center font-sans text-[11px] font-bold uppercase leading-none tracking-wide backdrop-blur-[1px]"
-                    style={{ color, borderColor: `${color}66` }}
-                  >
-                    <span className="truncate">{a.texto || "Texto"}</span>
-                  </div>
-                )}
+                {renderElemento(a)}
                 {modo === "editar" && sel && (
                   <>
                     <span className="pointer-events-none absolute -inset-1 rounded-md ring-2 ring-ambar" />

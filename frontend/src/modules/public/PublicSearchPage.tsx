@@ -44,6 +44,7 @@ export function PublicSearchPage() {
     () => anotaciones.filter((a) => (zonaId ? a.zona_id === zonaId : true)),
     [anotaciones, zonaId],
   );
+  const zonaActual = zonas.find((z) => z.id === zonaId) ?? null;
 
   // Zonas que contienen coincidencias (para orientar cuando están en otro piso).
   const zonasConMatch = useMemo(() => {
@@ -111,6 +112,7 @@ export function PublicSearchPage() {
           <MapaCanvas
             estantes={estantesZona}
             anotaciones={anotacionesZona}
+            textura={zonaActual?.textura ?? null}
             modo="ver"
             resaltados={resaltados}
             seleccionadoId={estantePanel?.id}

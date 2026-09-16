@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers, Undo2 } from "lucide-react";
 import { cn, colorLomo, altoLomo } from "@/lib/utils";
-import { listarLibros, listarCampos } from "@/modules/catalogo/api";
+import { listarLibros, listarCampos, guardarOrdenLibros } from "@/modules/catalogo/api";
+import { useToast } from "@/shared/components/ui/Toast";
 import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
 import type { Estante, Libro, Zona, CampoLibro } from "@/shared/types";
 
@@ -21,10 +22,14 @@ interface Props {
   estante: Estante;
   zonas: Zona[];
   onCerrar: () => void;
+  /** Habilita reordenar los lomos por drag & drop y persistir el orden (solo admin). */
+  permitirReordenar?: boolean;
 }
 
-export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
+export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar = false }: Props) {
   const zona = zonas.find((z) => z.id === estante.zona_id);
+  const qc = useQueryClient();
+  const toast = useToast();
 
   const { data: libros = [], isLoading } = useQuery({
     queryKey: ["libros", { estante_id: estante.id }],
@@ -34,6 +39,39 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
 
   const [orden, setOrden] = useState<string[]>([]);
   useEffect(() => { setOrden(libros.map((l) => l.id)); }, [libros]);
+
+  // Pila de deshacer (Ctrl+Z): guarda el orden previo a cada reordenamiento.
+  const undoStack = useRef<string[][]>([]);
+  // Al cambiar de estante, se reinicia el historial (el orden es por estante).
+  useEffect(() => { undoStack.current = []; }, [estante.id]);
+
+  // Persiste el orden completo del estante (orden = índice) y avisa por toast.
+  const guardarOrden = useMutation({
+    mutationFn: ({ ids }: { ids: string[]; mensaje: string }) =>
+      guardarOrdenLibros(ids.map((id, i) => ({ id, orden: i }))),
+    onSuccess: (_n, { mensaje }) => {
+      qc.invalidateQueries({ queryKey: ["libros"] });
+      toast.success(mensaje);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.detail ?? "No se pudo guardar el orden");
+      // Revertir a lo que hay en el servidor y descartar el historial.
+      setOrden(libros.map((l) => l.id));
+      undoStack.current = [];
+    },
+  });
+
+  // Aplica un nuevo orden: actualiza el estado local (optimista) y lo persiste.
+  function aplicarOrden(nuevoOrden: string[], mensaje: string) {
+    setOrden(nuevoOrden);
+    guardarOrden.mutate({ ids: nuevoOrden, mensaje });
+  }
+
+  function deshacer() {
+    const previo = undoStack.current.pop();
+    if (!previo) return;
+    aplicarOrden(previo, "Se deshizo el cambio de orden");
+  }
 
   // ── Niveles ("pisos") — 1..N de abajo hacia arriba ──────────────────────────
   const niveles = [...estante.niveles].sort((a, b) => a.numero - b.numero);
@@ -96,7 +134,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [selectedLibro]);
 
-  const canDrag = !filtro;
+  const canDrag = permitirReordenar && !filtro;
 
   function onDragStart(idx: number) { dragFromIdx.current = idx; }
 
@@ -108,15 +146,40 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
   function onDrop(toIdx: number) {
     const from = dragFromIdx.current;
     if (from === null || from === toIdx) return;
-    const o = [...orden];
-    o.splice(toIdx, 0, o.splice(from, 1)[0]);
-    setOrden(o);
+    // Los índices son relativos a los libros del nivel mostrado. Reordenamos esa
+    // sublista y la reinsertamos en el orden global manteniendo el resto en su lugar.
+    const idsNivel = librosNivel.map((l) => l.id);
+    if (from >= idsNivel.length || toIdx >= idsNivel.length) return;
+    const nuevosNivel = [...idsNivel];
+    nuevosNivel.splice(toIdx, 0, nuevosNivel.splice(from, 1)[0]);
+    const setNivel = new Set(idsNivel);
+    let k = 0;
+    const nuevoOrden = orden.map((id) => (setNivel.has(id) ? nuevosNivel[k++] : id));
+    // Guardar el orden previo para poder deshacer (Ctrl+Z).
+    undoStack.current.push(orden);
+    aplicarOrden(nuevoOrden, "Orden actualizado");
   }
 
   function onDragEnd() {
     dragFromIdx.current = null;
     setDragOverIdx(null);
   }
+
+  // Ctrl+Z / Cmd+Z: deshacer el último reordenamiento (solo en modo admin).
+  useEffect(() => {
+    if (!permitirReordenar) return;
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (undoStack.current.length === 0) return;
+        e.preventDefault();
+        deshacer();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [permitirReordenar]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleLomoClick(e: React.MouseEvent<HTMLButtonElement>, libro: Libro) {
     // Ignorar si fue un drag real (HTML5 suprime click, pero por si acaso).
@@ -305,11 +368,21 @@ export function EstantePanelInline({ estante, zonas, onCerrar }: Props) {
               </div>
               <div className="shelf-wood h-2 rounded-b-lg" />
               <div className="mt-1 flex items-center gap-3 text-[10px] text-stone-400">
-                {!filtro && librosNivel.length > 1 && (
+                {canDrag && librosNivel.length > 1 && (
                   <span className="flex items-center gap-1">
                     <GripHorizontal className="h-2.5 w-2.5" />
-                    Arrastrá para reordenar
+                    Arrastrá para reordenar · se guarda solo
                   </span>
+                )}
+                {canDrag && undoStack.current.length > 0 && (
+                  <button
+                    onClick={deshacer}
+                    className="flex items-center gap-1 text-unla transition-colors hover:text-unla-dark"
+                    title="Deshacer el último cambio de orden (Ctrl+Z)"
+                  >
+                    <Undo2 className="h-2.5 w-2.5" />
+                    Deshacer
+                  </button>
                 )}
                 {filtro && (
                   <span>{librosMostrados.length} de {librosNivel.length} coinciden</span>

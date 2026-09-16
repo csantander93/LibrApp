@@ -72,6 +72,42 @@ body {
   background-size: 32px 32px;
 }
 
+/* Texturas de piso alternativas por zona (se aplican sobre .map-floor). */
+
+/* Parquet: tablas horizontales trabadas. */
+.map-floor--parquet {
+  background-color: #e6d3b3;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(120, 82, 40, 0.28) 0 1px, transparent 1px 26px),
+    repeating-linear-gradient(90deg, rgba(120, 82, 40, 0.16) 0 1px, transparent 1px 90px);
+  background-size: 90px 52px;
+}
+
+/* Madera clara: tablas más suaves y anchas. */
+.map-floor--madera {
+  background-color: #efe1c6;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(150, 110, 60, 0.16) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(90deg, rgba(150, 110, 60, 0.08) 0 1px, transparent 1px 120px);
+  background-size: 120px 34px;
+}
+
+/* Baldosa: cuadrícula fría más marcada. */
+.map-floor--baldosa {
+  background-color: #edeef0;
+  background-image:
+    linear-gradient(rgba(110, 120, 130, 0.24) 2px, transparent 2px),
+    linear-gradient(90deg, rgba(110, 120, 130, 0.24) 2px, transparent 2px);
+  background-size: 56px 56px;
+}
+
+/* Cemento: superficie lisa cálida con moteado sutil. */
+.map-floor--cemento {
+  background-color: #dcd8cf;
+  background-image: radial-gradient(rgba(90, 80, 66, 0.10) 1px, transparent 1.4px);
+  background-size: 10px 10px;
+}
+
 /* Superficie del mapa: papel arquitectónico con grilla cálida. */
 .map-surface {
   background-color: var(--color-mapa);

@@ -19,8 +19,8 @@ export function AdminLayout() {
   const iniciales = (usuario?.nombre ?? usuario?.username ?? "?").slice(0, 2).toUpperCase();
 
   return (
-    <div className="flex min-h-full">
-      <aside className="sidebar-texture flex w-64 flex-col text-slate-300">
+    <div className="flex h-screen overflow-hidden">
+      <aside className="sidebar-texture flex w-64 shrink-0 flex-col text-slate-300">
         {/* Marca */}
         <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">
           <img
@@ -34,7 +34,7 @@ export function AdminLayout() {
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           <p className="px-3 pb-2 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
             Gestión
           </p>

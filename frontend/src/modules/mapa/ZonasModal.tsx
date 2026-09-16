@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Check, Loader2 } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
+import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
-import type { Zona } from "@/shared/types";
+import type { Zona, TexturaPiso } from "@/shared/types";
 import { crearZona, actualizarZona, eliminarZona } from "@/modules/catalogo/api";
+import { TEXTURAS_PISO } from "./elementos";
 
 /** ABM de zonas/pisos del mapa (RF-11). */
 export function ZonasModal({ zonas, onClose }: { zonas: Zona[]; onClose: () => void }) {
@@ -62,6 +64,11 @@ function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => v
     onSuccess: () => { onDone(); toast.success("Zona actualizada"); },
     onError,
   });
+  const cambiarTextura = useMutation({
+    mutationFn: (textura: TexturaPiso) => actualizarZona(zona.id, { textura }),
+    onSuccess: () => { onDone(); toast.success("Piso actualizado"); },
+    onError,
+  });
   const eliminar = useMutation({
     mutationFn: () => eliminarZona(zona.id),
     onSuccess: () => { onDone(); toast.success("Zona eliminada"); },
@@ -69,33 +76,46 @@ function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => v
   });
 
   return (
-    <div className="flex items-center gap-2">
-      <Input value={nombre} onChange={(e) => setNombre(e.target.value)} />
-      <button
-        onClick={() => cambiado && renombrar.mutate()}
-        disabled={!cambiado || renombrar.isPending}
-        title="Guardar nombre"
-        className="rounded-lg p-2 text-slate-400 enabled:hover:bg-emerald-50 enabled:hover:text-emerald-600 disabled:opacity-40"
-      >
-        <Check className="h-4 w-4" />
-      </button>
-      <button
-        onClick={async () => {
-          const ok = await confirmar({
-            mensaje: (
-              <>
-                ¿Eliminar la zona <strong className="font-semibold text-stone-800">“{zona.nombre}”</strong>?
-              </>
-            ),
-          });
-          if (ok) eliminar.mutate();
-        }}
-        disabled={eliminar.isPending}
-        title="Eliminar zona"
-        className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+    <div className="rounded-lg border border-slate-100 bg-slate-50/40 p-2">
+      <div className="flex items-center gap-2">
+        <Input value={nombre} onChange={(e) => setNombre(e.target.value)} />
+        <button
+          onClick={() => cambiado && renombrar.mutate()}
+          disabled={!cambiado || renombrar.isPending}
+          title="Guardar nombre"
+          className="rounded-lg p-2 text-slate-400 enabled:hover:bg-emerald-50 enabled:hover:text-emerald-600 disabled:opacity-40"
+        >
+          <Check className="h-4 w-4" />
+        </button>
+        <button
+          onClick={async () => {
+            const ok = await confirmar({
+              mensaje: (
+                <>
+                  ¿Eliminar la zona <strong className="font-semibold text-stone-800">“{zona.nombre}”</strong>?
+                </>
+              ),
+            });
+            if (ok) eliminar.mutate();
+          }}
+          disabled={eliminar.isPending}
+          title="Eliminar zona"
+          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="mt-1.5 flex items-center gap-2 pl-1">
+        <span className="text-[11px] font-medium text-slate-400">Piso del mapa</span>
+        <Select
+          value={zona.textura ?? "grilla"}
+          onChange={(e) => cambiarTextura.mutate(e.target.value as TexturaPiso)}
+          disabled={cambiarTextura.isPending}
+          className="w-44 py-1 text-xs"
+        >
+          {TEXTURAS_PISO.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+        </Select>
+      </div>
     </div>
   );
 }

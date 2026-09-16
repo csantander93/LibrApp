@@ -24,6 +24,8 @@ export interface Libro {
   coleccion_id: string | null;
   estante_id: string | null;
   nivel_id: string | null;
+  /** Orden manual dentro del nivel/estante (menor = primero). */
+  orden: number;
   estante_codigo: string | null;
   nivel_numero: number | null;
   coleccion_nombre: string | null;
@@ -73,10 +75,15 @@ export interface Coleccion {
   descripcion: string | null;
 }
 
+/** Textura del piso del plano de una zona. null/"grilla" = grilla por defecto. */
+export type TexturaPiso = "grilla" | "parquet" | "baldosa" | "cemento" | "madera";
+
 export interface Zona {
   id: string;
   nombre: string;
   orden: number;
+  /** Aspecto del piso del mapa en esta zona. null = grilla por defecto. */
+  textura: TexturaPiso | null;
 }
 
 /** Nivel ("piso") dentro de un estante. Numerados 1..N de abajo hacia arriba. */
@@ -105,7 +112,15 @@ export interface Estante {
   niveles: Nivel[];
 }
 
-export type AnotacionTipo = "texto" | "flecha";
+export type AnotacionTipo =
+  // Señalética
+  | "texto" | "flecha" | "flecha_doble" | "ventana" | "bano"
+  // Mobiliario
+  | "mesa_redonda" | "mesa_cuadrada" | "mesa_rect" | "silla" | "sillon" | "mostrador"
+  // Plantas y deco
+  | "planta" | "maceta" | "alfombra"
+  // Estructura
+  | "escalera" | "columna" | "pared" | "puerta";
 
 /** Marca de referencia sobre el plano (ENTRADA, ESCALERA, VENTANA, flechas). */
 export interface Anotacion {

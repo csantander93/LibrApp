@@ -9,7 +9,7 @@ from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, ColeccionResponse, ZonaResponse,
     LibroCreate, LibroUpdate, PrecioUpdate,
     EstanteCreate, EstanteUpdate, ColeccionCreate, ImportResultado,
-    PosicionesUpdate, ZonaCreate, ZonaUpdate,
+    PosicionesUpdate, ZonaCreate, ZonaUpdate, LibrosOrdenUpdate,
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
     LibroImagenResponse,
@@ -91,6 +91,17 @@ def obtener_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 # ─── Escritura: Libros (RF-04 / RF-09) ────────────────────────────────────────
+
+# Declarado ANTES de /libros/{libro_id} para que "orden" no se parsee como UUID
+# (guardado en lote del reordenamiento de lomos en el mapa — RF-01/RF-03).
+@router.put("/libros/orden")
+def guardar_orden_libros(data: LibrosOrdenUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    actualizados = service.actualizar_orden_libros(db, data.libros)
+    audit.registrar_accion(
+        f"Reordenó libros en el mapa ({actualizados})", modulo="Mapa", accion="Edición",
+    )
+    return {"actualizados": actualizados}
+
 
 @router.post("/libros", response_model=LibroResponse, status_code=status.HTTP_201_CREATED)
 def crear_libro(data: LibroCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):

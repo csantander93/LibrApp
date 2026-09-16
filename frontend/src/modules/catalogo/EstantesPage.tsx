@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { Estante } from "@/shared/types";
 import { listarEstantes, listarZonas, eliminarEstante } from "./api";
 import { EstanteFormModal } from "./EstanteFormModal";
+import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 
 /** Columnas ordenables de estantes. */
 type CampoOrden = "codigo" | "etiqueta" | "zona" | "niveles" | "libros";
@@ -23,6 +24,8 @@ export function EstantesPage() {
   const [modal, setModal] = useState(false);
   const [edit, setEdit] = useState<Estante | null>(null);
   const [orden, setOrden] = useState<Orden | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
 
   const eliminar = useMutation({
     mutationFn: eliminarEstante,
@@ -65,6 +68,14 @@ export function EstantesPage() {
       }
     });
   }, [estantes, zonas, orden]);
+
+  const total = estantesOrdenados.length;
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const visibles = useMemo(
+    () => estantesOrdenados.slice((paginaActual - 1) * pageSize, paginaActual * pageSize),
+    [estantesOrdenados, paginaActual, pageSize],
+  );
 
   function ordenarPor(campo: CampoOrden) {
     setOrden((prev) => {
@@ -150,7 +161,7 @@ export function EstantesPage() {
                 <Loader2 className="mx-auto h-5 w-5 animate-spin" />
               </td></tr>
             )}
-            {estantesOrdenados.map((e) => (
+            {visibles.map((e) => (
               <tr key={e.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-unla/10 px-2 py-0.5 text-xs font-medium text-unla">{e.codigo}</span>
@@ -182,6 +193,18 @@ export function EstantesPage() {
           </tbody>
         </table>
       </div>
+
+      {!isLoading && (
+        <TablePagination
+          page={paginaActual}
+          pages={totalPaginas}
+          total={total}
+          pageSize={pageSize}
+          onPage={setPagina}
+          onPageSize={(n) => { setPageSize(n); setPagina(1); }}
+          unidad="estante"
+        />
+      )}
 
       {modal && (
         <EstanteFormModal

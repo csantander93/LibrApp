@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import type {
   Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
-  Anotacion, AnotacionTipo, LibroImagen, CampoLibro, CampoLibroInput,
+  Anotacion, AnotacionTipo, LibroImagen, CampoLibro, CampoLibroInput, TexturaPiso,
 } from "@/shared/types";
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ export async function listarZonas(): Promise<Zona[]> {
 export interface ZonaInput {
   nombre: string;
   orden?: number;
+  textura?: TexturaPiso | null;
 }
 
 export async function crearZona(input: ZonaInput): Promise<Zona> {
@@ -80,6 +81,22 @@ export async function actualizarPrecio(id: string, precio: string | null): Promi
 
 export async function eliminarLibro(id: string): Promise<void> {
   await api.delete(`/catalogo/libros/${id}`);
+}
+
+// ─── Orden manual de libros (drag & drop de lomos en el mapa) ──────────────────
+
+export interface LibroOrden {
+  id: string;
+  orden: number;
+}
+
+/** Guarda en lote el orden de los libros (menor `orden` = primero). */
+export async function guardarOrdenLibros(libros: LibroOrden[]): Promise<number> {
+  const { data } = await api.put<{ actualizados: number }>(
+    "/catalogo/libros/orden",
+    { libros },
+  );
+  return data.actualizados;
 }
 
 // ─── Imágenes de libros ───────────────────────────────────────────────────────

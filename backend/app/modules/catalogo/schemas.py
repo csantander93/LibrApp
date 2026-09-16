@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from app.modules.catalogo.models import TIPOS_CAMPO
+from app.modules.catalogo.models import TIPOS_CAMPO, TIPOS_ANOTACION, TEXTURAS_PISO
 
 
 # ─── Respuestas de lectura ────────────────────────────────────────────────────
@@ -14,16 +14,30 @@ class ColeccionResponse(BaseModel):
     descripcion: str | None
 
 
+def _textura_valida(v: str | None) -> str | None:
+    """Normaliza la textura de piso; None/'' ⇒ None (grilla por defecto)."""
+    if v is None:
+        return None
+    v = v.strip().lower()
+    if not v or v == "grilla":
+        return None
+    if v not in TEXTURAS_PISO:
+        raise ValueError(f"Textura inválida. Debe ser una de: {', '.join(TEXTURAS_PISO)}")
+    return v
+
+
 class ZonaResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     nombre: str
     orden: int
+    textura: str | None = None
 
 
 class ZonaCreate(BaseModel):
     nombre: str
     orden: int = 0
+    textura: str | None = None
 
     @field_validator("nombre")
     @classmethod
@@ -33,10 +47,16 @@ class ZonaCreate(BaseModel):
             raise ValueError("El nombre es obligatorio")
         return v
 
+    @field_validator("textura")
+    @classmethod
+    def _textura_norm(cls, v: str | None) -> str | None:
+        return _textura_valida(v)
+
 
 class ZonaUpdate(BaseModel):
     nombre: str | None = None
     orden: int | None = None
+    textura: str | None = None
 
     @field_validator("nombre")
     @classmethod
@@ -47,6 +67,11 @@ class ZonaUpdate(BaseModel):
         if not v:
             raise ValueError("El nombre no puede quedar vacío")
         return v
+
+    @field_validator("textura")
+    @classmethod
+    def _textura_norm(cls, v: str | None) -> str | None:
+        return _textura_valida(v)
 
 
 class NivelResponse(BaseModel):
@@ -96,6 +121,8 @@ class LibroResponse(BaseModel):
     coleccion_id: uuid.UUID | None
     estante_id: uuid.UUID | None
     nivel_id: uuid.UUID | None = None
+    # Orden manual dentro del nivel/estante (menor = primero).
+    orden: int = 0
     estante_codigo: str | None = None
     nivel_numero: int | None = None
     coleccion_nombre: str | None = None
@@ -168,6 +195,17 @@ class LibroUpdate(BaseModel):
 class PrecioUpdate(BaseModel):
     """RF-09 / HU-03: actualizar solo el precio."""
     precio: Decimal | None
+
+
+# ─── Reordenamiento de libros en el mapa (drag & drop de lomos) ────────────────
+
+class LibroOrdenItem(BaseModel):
+    id: uuid.UUID
+    orden: int
+
+
+class LibrosOrdenUpdate(BaseModel):
+    libros: list[LibroOrdenItem]
 
 
 # ─── Escritura: Estante (RF-02) ───────────────────────────────────────────────
@@ -296,8 +334,8 @@ class AnotacionCreate(BaseModel):
     @classmethod
     def _tipo_valido(cls, v: str) -> str:
         v = (v or "texto").strip().lower()
-        if v not in ("texto", "flecha"):
-            raise ValueError("El tipo debe ser 'texto' o 'flecha'")
+        if v not in TIPOS_ANOTACION:
+            raise ValueError(f"Tipo inválido. Debe ser uno de: {', '.join(TIPOS_ANOTACION)}")
         return v
 
 

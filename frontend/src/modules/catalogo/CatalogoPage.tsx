@@ -12,8 +12,7 @@ import { listarLibros, listarColecciones, listarEstantes, eliminarLibro, urlImag
 import { LibroFormModal } from "./LibroFormModal";
 import { LibroDetalleModal } from "./LibroDetalleModal";
 import { CamposLibroManager } from "./CamposLibroManager";
-
-const PAGE_SIZE = 15;
+import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 
 /** Columnas ordenables del catálogo. */
 type CampoOrden = "titulo" | "autor" | "editorial" | "coleccion_nombre" | "estante_codigo" | "precio";
@@ -69,6 +68,7 @@ export function CatalogoPage() {
   const [estanteId, setEstanteId] = useState("");
   const [soloSinUbicar, setSoloSinUbicar] = useState(false);
   const [pagina, setPagina] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const [orden, setOrden] = useState<Orden | null>(null);
   const [vista, setVista] = useState<Vista>("lista");
   const [modalAbierto, setModalAbierto] = useState(false);
@@ -136,11 +136,11 @@ export function CatalogoPage() {
   }
 
   const total = librosOrdenados.length;
-  const totalPaginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize));
   const paginaActual = Math.min(pagina, totalPaginas);
   const visibles = useMemo(
-    () => librosOrdenados.slice((paginaActual - 1) * PAGE_SIZE, paginaActual * PAGE_SIZE),
-    [librosOrdenados, paginaActual],
+    () => librosOrdenados.slice((paginaActual - 1) * pageSize, paginaActual * pageSize),
+    [librosOrdenados, paginaActual, pageSize],
   );
 
   function abrirAlta() {
@@ -431,18 +431,16 @@ export function CatalogoPage() {
       )}
 
       {/* Paginación */}
-      {total > PAGE_SIZE && (
-        <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
-          <span>Página {paginaActual} de {totalPaginas}</span>
-          <div className="flex gap-2">
-            <Button variant="outline" disabled={paginaActual <= 1} onClick={() => setPagina((p) => p - 1)}>
-              Anterior
-            </Button>
-            <Button variant="outline" disabled={paginaActual >= totalPaginas} onClick={() => setPagina((p) => p + 1)}>
-              Siguiente
-            </Button>
-          </div>
-        </div>
+      {!isLoading && (
+        <TablePagination
+          page={paginaActual}
+          pages={totalPaginas}
+          total={total}
+          pageSize={pageSize}
+          onPage={setPagina}
+          onPageSize={(n) => { setPageSize(n); setPagina(1); }}
+          unidad="libro"
+        />
       )}
 
       <LibroDetalleModal
