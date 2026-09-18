@@ -29,9 +29,13 @@ def bootstrap_dev() -> None:
         _seed_admin(db, rol_admin)
         zona = _seed_zona(db)
         colecciones = _seed_colecciones(db)
-        estantes = _seed_estantes(db, zona)
-        _seed_libros(db, colecciones, estantes)
-        _seed_anotaciones(db, zona)
+        # El demo de mapa (estantes + libros + anotaciones) sólo tiene sentido en una
+        # base vacía. Si ya hay catálogo (p.ej. importado desde Excel/CSV), NO lo
+        # sembramos: evita duplicar estantes y pisar un mapa armado a mano.
+        if db.query(Libro).count() == 0:
+            estantes = _seed_estantes(db, zona)
+            _seed_libros(db, colecciones, estantes)
+            _seed_anotaciones(db, zona)
         db.commit()
     finally:
         db.close()

@@ -76,7 +76,8 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 
 ### Frontend (`frontend/src`)
 - `app/`: `App` → `providers` (QueryClient + BrowserRouter + `AuthProvider`) → `AppRoutes`.
-- `modules/<x>/`: feature-first (`auth`, `dashboard`, `public`, `catalogo`, `mapa`). Solo
+- `modules/<x>/`: feature-first (`auth`, `dashboard`, `public`, `catalogo`, `mapa`,
+  `configuracion`, `usuarios`, `auditoria`). Solo
   `auth` y `catalogo` tienen su propio `api.ts`; el módulo `mapa` importa de `catalogo/api.ts`
   y `dashboard`/`public` definen sus fetches inline. Al agregar una feature, agregá a
   `catalogo/api.ts` o creá un nuevo `api.ts` en el módulo según corresponda.
@@ -101,6 +102,7 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 | `/admin/estantes` | ABM de estantes (RF-02) |
 | `/admin/mapa` | Editor de mapa 2D con drag & resize (RF-01/RF-10/RF-11) |
 | `/admin/importar` | Importador Excel/CSV con dry-run (RF-05/CU-04) |
+| `/admin/registros` | Registros de auditoría (permiso `registros.ver`) |
 | `/admin/configuracion` | Ajustes + pestañas **Usuarios** y **Roles** (RF-08); las pestañas se muestran según permiso |
 
 ## Reglas de negocio clave (implementadas — no romper)
