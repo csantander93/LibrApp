@@ -7,12 +7,13 @@ import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
-import type { Zona, TexturaPiso } from "@/shared/types";
+import type { Zona, Estante, TexturaPiso } from "@/shared/types";
 import { crearZona, actualizarZona, eliminarZona } from "@/modules/catalogo/api";
 import { TEXTURAS_PISO } from "./elementos";
+import { ReubicarEliminarModal } from "./ReubicarEliminarModal";
 
 /** ABM de zonas/pisos del mapa (RF-11). */
-export function ZonasModal({ zonas, onClose }: { zonas: Zona[]; onClose: () => void }) {
+export function ZonasModal({ zonas, estantes, onClose }: { zonas: Zona[]; estantes: Estante[]; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [nuevo, setNuevo] = useState("");
@@ -33,7 +34,14 @@ export function ZonasModal({ zonas, onClose }: { zonas: Zona[]; onClose: () => v
 
       <div className="space-y-2">
         {zonas.map((z) => (
-          <ZonaRow key={z.id} zona={z} onError={alertar} onDone={invalidar} />
+          <ZonaRow
+            key={z.id}
+            zona={z}
+            otrasZonas={zonas.filter((o) => o.id !== z.id)}
+            cantidadEstantes={estantes.filter((e) => e.zona_id === z.id).length}
+            onError={alertar}
+            onDone={invalidar}
+          />
         ))}
       </div>
 
@@ -53,10 +61,20 @@ export function ZonasModal({ zonas, onClose }: { zonas: Zona[]; onClose: () => v
   );
 }
 
-function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => void; onDone: () => void }) {
+function ZonaRow({
+  zona, otrasZonas, cantidadEstantes, onError, onDone,
+}: {
+  zona: Zona;
+  otrasZonas: Zona[];
+  cantidadEstantes: number;
+  onError: (e: any) => void;
+  onDone: () => void;
+}) {
   const toast = useToast();
   const confirmar = useConfirm();
+  const qc = useQueryClient();
   const [nombre, setNombre] = useState(zona.nombre);
+  const [borrarModal, setBorrarModal] = useState(false);
   const cambiado = nombre.trim() !== zona.nombre && nombre.trim().length > 0;
 
   const renombrar = useMutation({
@@ -70,10 +88,29 @@ function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => v
     onError,
   });
   const eliminar = useMutation({
-    mutationFn: () => eliminarZona(zona.id),
-    onSuccess: () => { onDone(); toast.success("Zona eliminada"); },
-    onError, // RN: bloquea si tiene estantes
+    mutationFn: (moverA: string | null) => eliminarZona(zona.id, moverA),
+    onSuccess: () => {
+      setBorrarModal(false);
+      onDone();
+      // Los estantes movidos/desvinculados cambian su zona → refrescar catálogo.
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      toast.success("Zona eliminada");
+    },
+    onError,
   });
+
+  async function pedirEliminar() {
+    // Con estantes: modal con opciones (mover a otra zona o dejar sin zona).
+    if (cantidadEstantes > 0) { setBorrarModal(true); return; }
+    const ok = await confirmar({
+      mensaje: (
+        <>
+          ¿Eliminar la zona <strong className="font-semibold text-stone-800">“{zona.nombre}”</strong>?
+        </>
+      ),
+    });
+    if (ok) eliminar.mutate(null);
+  }
 
   return (
     <div className="rounded-lg border border-slate-100 bg-slate-50/40 p-2">
@@ -88,16 +125,7 @@ function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => v
           <Check className="h-4 w-4" />
         </button>
         <button
-          onClick={async () => {
-            const ok = await confirmar({
-              mensaje: (
-                <>
-                  ¿Eliminar la zona <strong className="font-semibold text-stone-800">“{zona.nombre}”</strong>?
-                </>
-              ),
-            });
-            if (ok) eliminar.mutate();
-          }}
+          onClick={pedirEliminar}
           disabled={eliminar.isPending}
           title="Eliminar zona"
           className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
@@ -105,6 +133,32 @@ function ZonaRow({ zona, onError, onDone }: { zona: Zona; onError: (e: any) => v
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
+
+      {borrarModal && (
+        <ReubicarEliminarModal
+          titulo={`Eliminar zona “${zona.nombre}”`}
+          advertencia={
+            <>
+              Esta zona tiene <strong className="font-semibold text-stone-800">{cantidadEstantes} estante(s)</strong>.
+              Al eliminarla no se borra ningún estante (ni sus libros): elegí qué hacer con ellos.
+            </>
+          }
+          dejar={{
+            label: "Dejar los estantes sin zona",
+            descripcion: "Quedan sin zona; los reasignás después desde el ABM de estantes.",
+          }}
+          mover={{
+            label: "Mover los estantes a otra zona",
+            descripcion: "Se reasignan a la zona que elijas.",
+            placeholder: "Elegí una zona…",
+            opciones: otrasZonas.map((z) => ({ id: z.id, label: z.nombre })),
+            sinOpciones: "No hay otra zona a la que mover los estantes.",
+          }}
+          onClose={() => setBorrarModal(false)}
+          onConfirmar={(moverA) => eliminar.mutate(moverA)}
+          pending={eliminar.isPending}
+        />
+      )}
       <div className="mt-1.5 flex items-center gap-2 pl-1">
         <span className="text-[11px] font-medium text-slate-400">Piso del mapa</span>
         <Select

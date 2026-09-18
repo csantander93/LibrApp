@@ -18,15 +18,26 @@ function formatearDato(campo: CampoLibro, valor: unknown): string {
   return String(valor);
 }
 
+/** Coincidencia de un libro con el texto buscado: por título, autor o ISBN (CU-01). */
+function coincideLibro(l: Libro, filtro: string): boolean {
+  return (
+    l.titulo.toLowerCase().includes(filtro) ||
+    l.autor.toLowerCase().includes(filtro) ||
+    (l.isbn ?? "").toLowerCase().includes(filtro)
+  );
+}
+
 interface Props {
   estante: Estante;
   zonas: Zona[];
   onCerrar: () => void;
   /** Habilita reordenar los lomos por drag & drop y persistir el orden (solo admin). */
   permitirReordenar?: boolean;
+  /** Texto con el que arranca el buscador interno (viene del buscador del mapa). */
+  filtroInicial?: string;
 }
 
-export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar = false }: Props) {
+export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar = false, filtroInicial }: Props) {
   const zona = zonas.find((z) => z.id === estante.zona_id);
   const qc = useQueryClient();
   const toast = useToast();
@@ -86,7 +97,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   const subirNivel = () => { if (nivelIdx < niveles.length - 1) setNivelSelId(niveles[nivelIdx + 1].id); };
   const bajarNivel = () => { if (nivelIdx > 0) setNivelSelId(niveles[nivelIdx - 1].id); };
 
-  const [busqueda, setBusqueda] = useState("");
+  const [busqueda, setBusqueda] = useState(filtroInicial ?? "");
   const [selectedLibro, setSelectedLibro] = useState<Libro | null>(null);
   const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -108,11 +119,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
     : librosOrdenados;
 
   const librosMostrados = filtro
-    ? librosNivel.filter(
-        (l) =>
-          l.titulo.toLowerCase().includes(filtro) ||
-          l.autor.toLowerCase().includes(filtro),
-      )
+    ? librosNivel.filter((l) => coincideLibro(l, filtro))
     : librosNivel;
 
   useEffect(() => {
@@ -120,6 +127,23 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   }, [filtro]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Al abrir el estante desde el buscador del mapa, precargar ese texto en el
+  // buscador interno y saltar al nivel donde está el primer libro que coincide.
+  // Se aplica una sola vez por (estante, filtro) para no pisar lo que tipee el usuario.
+  const filtroAplicado = useRef<string | null>(null);
+  useEffect(() => {
+    const clave = `${estante.id}|${filtroInicial ?? ""}`;
+    if (filtroAplicado.current === clave) return;
+    if (filtroInicial && isLoading) return; // esperar los libros para ubicar el nivel
+    filtroAplicado.current = clave;
+    setBusqueda(filtroInicial ?? "");
+    if (filtroInicial) {
+      const f = filtroInicial.trim().toLowerCase();
+      const match = libros.find((l) => coincideLibro(l, f));
+      if (match?.nivel_id) setNivelSelId(match.nivel_id);
+    }
+  }, [estante.id, filtroInicial, isLoading, libros]);
 
   // Cerrar popover al hacer clic fuera.
   useEffect(() => {

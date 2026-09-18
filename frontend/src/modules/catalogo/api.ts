@@ -53,8 +53,12 @@ export async function actualizarZona(id: string, input: Partial<ZonaInput>): Pro
   return data;
 }
 
-export async function eliminarZona(id: string): Promise<void> {
-  await api.delete(`/catalogo/zonas/${id}`);
+/** Elimina una zona. Si tiene estantes: `moverA` = id de otra zona donde moverlos,
+ *  o null/undefined para dejarlos sin zona (RN-08 análogo). */
+export async function eliminarZona(id: string, moverA?: string | null): Promise<void> {
+  await api.delete(`/catalogo/zonas/${id}`, {
+    params: moverA ? { mover_a: moverA } : undefined,
+  });
 }
 
 export async function listarEstantes(): Promise<Estante[]> {
@@ -142,8 +146,12 @@ export async function actualizarEstante(id: string, input: Partial<EstanteInput>
   return data;
 }
 
-export async function eliminarEstante(id: string): Promise<void> {
-  await api.delete(`/catalogo/estantes/${id}`);
+/** Elimina un estante. Si tiene libros: `reasignarA` = id de otro estante donde
+ *  moverlos, o null/undefined para dejarlos 'Sin ubicar' (RN-08 revisado). */
+export async function eliminarEstante(id: string, reasignarA?: string | null): Promise<void> {
+  await api.delete(`/catalogo/estantes/${id}`, {
+    params: reasignarA ? { reasignar_a: reasignarA } : undefined,
+  });
 }
 
 // ─── Niveles ("pisos" del estante) ────────────────────────────────────────────
@@ -158,8 +166,12 @@ export async function actualizarNivel(id: string, input: { etiqueta: string | nu
   return data;
 }
 
-export async function eliminarNivel(id: string): Promise<void> {
-  await api.delete(`/catalogo/niveles/${id}`);
+/** Elimina un nivel. Si tiene libros: `moverA` = id de otro nivel del mismo estante
+ *  donde moverlos, o null/undefined para dejarlos en el estante sin nivel. */
+export async function eliminarNivel(id: string, moverA?: string | null): Promise<void> {
+  await api.delete(`/catalogo/niveles/${id}`, {
+    params: moverA ? { mover_a: moverA } : undefined,
+  });
 }
 
 export interface PosicionEstante {

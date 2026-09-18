@@ -209,11 +209,22 @@ def actualizar_estante(estante_id: uuid.UUID, data: EstanteUpdate, db: Session =
 
 
 @router.delete("/estantes/{estante_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_estante(estante_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
+def eliminar_estante(
+    estante_id: uuid.UUID,
+    reasignar_a: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT_EST,
+):
     estante = service.obtener_estante(db, estante_id)
     codigo = estante.codigo
-    service.eliminar_estante(db, estante_id)
-    audit.registrar_accion(f"Eliminó el estante '{codigo}'", modulo=_MODULO, accion="Eliminación")
+    movidos, destino = service.eliminar_estante(db, estante_id, reasignar_a)
+    if movidos and destino:
+        detalle = f" y movió {movidos} libro(s) al estante '{destino}'"
+    elif movidos:
+        detalle = f" y dejó {movidos} libro(s) sin ubicar"
+    else:
+        detalle = ""
+    audit.registrar_accion(f"Eliminó el estante '{codigo}'{detalle}", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Escritura: Niveles ("pisos" del estante — RF-02) ─────────────────────────
@@ -233,11 +244,22 @@ def actualizar_nivel(nivel_id: uuid.UUID, data: NivelUpdate, db: Session = Depen
 
 
 @router.delete("/niveles/{nivel_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_nivel(nivel_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
+def eliminar_nivel(
+    nivel_id: uuid.UUID,
+    mover_a: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT_EST,
+):
     nivel = service.obtener_nivel(db, nivel_id)
     numero = nivel.numero
-    service.eliminar_nivel(db, nivel_id)
-    audit.registrar_accion(f"Eliminó el nivel N.º {numero}", modulo=_MODULO, accion="Eliminación")
+    movidos = service.eliminar_nivel(db, nivel_id, mover_a)
+    if movidos and mover_a:
+        detalle = f" y movió {movidos} libro(s) a otro nivel"
+    elif movidos:
+        detalle = f" y dejó {movidos} libro(s) sin nivel"
+    else:
+        detalle = ""
+    audit.registrar_accion(f"Eliminó el nivel N.º {numero}{detalle}", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Escritura: Anotaciones del mapa (flechas / textos) ───────────────────────
@@ -285,11 +307,22 @@ def actualizar_zona(zona_id: uuid.UUID, data: ZonaUpdate, db: Session = Depends(
 
 
 @router.delete("/zonas/{zona_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_zona(zona_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
+def eliminar_zona(
+    zona_id: uuid.UUID,
+    mover_a: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT_EST,
+):
     zona = service.obtener_zona(db, zona_id)
     nombre = zona.nombre
-    service.eliminar_zona(db, zona_id)
-    audit.registrar_accion(f"Eliminó la zona '{nombre}'", modulo=_MODULO, accion="Eliminación")
+    movidos, destino = service.eliminar_zona(db, zona_id, mover_a)
+    if movidos and destino:
+        detalle = f" y movió {movidos} estante(s) a la zona '{destino}'"
+    elif movidos:
+        detalle = f" y dejó {movidos} estante(s) sin zona"
+    else:
+        detalle = ""
+    audit.registrar_accion(f"Eliminó la zona '{nombre}'{detalle}", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Escritura: Colecciones (RN-10) ───────────────────────────────────────────

@@ -530,17 +530,46 @@ def eliminar_anotacion(db: Session, anotacion_id: uuid.UUID) -> None:
     db.commit()
 
 
-def eliminar_estante(db: Session, estante_id: uuid.UUID) -> None:
-    """RN-08: no se puede eliminar un estante con libros asignados."""
+def eliminar_estante(
+    db: Session, estante_id: uuid.UUID, reasignar_a: uuid.UUID | None = None
+) -> tuple[int, str | None]:
+    """RN-08 (revisado): eliminar un estante NUNCA pierde libros; solo los reubica.
+    Caso típico: el estante físico se rompió, hay que sacarlo del mapa.
+    - `reasignar_a=None`  → los libros quedan 'Sin ubicar' (estante_id/nivel_id = null,
+      RN-07/RN-09) para reacomodarlos luego desde el catálogo.
+    - `reasignar_a=<otro>` → se mueven a ese estante (a su primer nivel si tiene).
+    Devuelve (cantidad de libros afectados, código del estante destino o None).
+    """
     e = obtener_estante(db, estante_id)
-    total = db.query(func.count(Libro.id)).filter(Libro.estante_id == e.id).scalar() or 0
-    if total > 0:
-        raise ConflictError(
-            f"El estante '{e.codigo}' tiene {total} libro(s) asignado(s). "
-            "Reasignalos o dejalos 'Sin ubicar' antes de eliminarlo."
-        )
+    libros = db.query(Libro).filter(Libro.estante_id == e.id).all()
+    destino_codigo: str | None = None
+    if libros:
+        if reasignar_a is not None:
+            if reasignar_a == e.id:
+                raise ConflictError("No podés mover los libros al mismo estante que vas a eliminar.")
+            destino = db.get(Estante, reasignar_a)
+            if not destino:
+                raise NotFoundError("El estante destino no existe")
+            destino_codigo = destino.codigo
+            # Los libros aterrizan en el primer nivel del destino (menor número); si el
+            # destino no tiene niveles, quedan en el estante sin nivel asignado.
+            nivel_destino = (
+                db.query(Nivel)
+                .filter(Nivel.estante_id == destino.id)
+                .order_by(Nivel.numero)
+                .first()
+            )
+            for lb in libros:
+                lb.estante_id = destino.id
+                lb.nivel_id = nivel_destino.id if nivel_destino else None
+        else:
+            for lb in libros:
+                lb.estante_id = None
+                lb.nivel_id = None
+        db.flush()
     db.delete(e)
     db.commit()
+    return len(libros), destino_codigo
 
 
 # ─── Escritura: Niveles ("pisos" del estante) ─────────────────────────────────
@@ -582,17 +611,28 @@ def actualizar_nivel(db: Session, nivel_id: uuid.UUID, data: NivelUpdate) -> Niv
     return _stash_audit(_to_nivel_response(n, _conteo_libros_nivel(db, n.id)), desc)
 
 
-def eliminar_nivel(db: Session, nivel_id: uuid.UUID) -> None:
-    """Guarda análoga a RN-08: no se puede eliminar un nivel con libros.
-    Tras borrar, renumera los niveles restantes del estante para mantenerlos 1..N."""
+def eliminar_nivel(db: Session, nivel_id: uuid.UUID, mover_a: uuid.UUID | None = None) -> int:
+    """RN-08 análogo (revisado): eliminar un nivel NUNCA pierde libros.
+    - `mover_a=None`  → los libros quedan en el estante pero sin nivel (nivel_id = null).
+    - `mover_a=<otro nivel del mismo estante>` → se reasignan a ese nivel.
+    Tras borrar, renumera los niveles restantes 1..N. Devuelve la cantidad de libros
+    afectados."""
     n = obtener_nivel(db, nivel_id)
-    total = _conteo_libros_nivel(db, n.id)
-    if total > 0:
-        raise ConflictError(
-            f"El nivel {n.numero} tiene {total} libro(s) asignado(s). "
-            "Reasignalos antes de eliminarlo."
-        )
     estante_id = n.estante_id
+    libros = db.query(Libro).filter(Libro.nivel_id == n.id).all()
+    if libros:
+        if mover_a is not None:
+            if mover_a == n.id:
+                raise ConflictError("No podés mover los libros al mismo nivel que vas a eliminar.")
+            destino = db.get(Nivel, mover_a)
+            if not destino or destino.estante_id != estante_id:
+                raise NotFoundError("El nivel destino no existe en este estante")
+            for lb in libros:
+                lb.nivel_id = destino.id
+        else:
+            for lb in libros:
+                lb.nivel_id = None
+        db.flush()
     db.delete(n)
     db.flush()
     # Renumerar 1..N por orden actual (evita huecos tras el borrado).
@@ -603,6 +643,7 @@ def eliminar_nivel(db: Session, nivel_id: uuid.UUID) -> None:
         if nivel.numero != idx:
             nivel.numero = idx
     db.commit()
+    return len(libros)
 
 
 # ─── Escritura: Colección ─────────────────────────────────────────────────────
@@ -646,17 +687,42 @@ def actualizar_zona(db: Session, zona_id: uuid.UUID, data: ZonaUpdate) -> Zona:
     return _stash_audit(z, desc)
 
 
-def eliminar_zona(db: Session, zona_id: uuid.UUID) -> None:
-    """No se puede eliminar una zona con estantes (mismo criterio que RN-08)."""
+def eliminar_zona(db: Session, zona_id: uuid.UUID, mover_a: uuid.UUID | None = None) -> tuple[int, str | None]:
+    """RN-08 análogo (revisado): eliminar una zona NUNCA pierde estantes (ni sus libros).
+    - `mover_a=None`  → los estantes quedan sin zona (zona_id = null); se reasignan luego.
+    - `mover_a=<otra zona>` → se mueven a esa zona.
+    Devuelve (cantidad de estantes afectados, nombre de la zona destino o None)."""
     z = obtener_zona(db, zona_id)
-    total = db.query(func.count(Estante.id)).filter(Estante.zona_id == z.id).scalar() or 0
-    if total > 0:
-        raise ConflictError(
-            f"La zona '{z.nombre}' tiene {total} estante(s). "
-            "Movelos a otra zona antes de eliminarla."
-        )
+    estantes = db.query(Estante).filter(Estante.zona_id == z.id).all()
+    destino_nombre: str | None = None
+    if estantes:
+        if mover_a is not None:
+            if mover_a == z.id:
+                raise ConflictError("No podés mover los estantes a la misma zona que vas a eliminar.")
+            destino = db.get(Zona, mover_a)
+            if not destino:
+                raise NotFoundError("La zona destino no existe")
+            destino_nombre = destino.nombre
+            # RN-04: el código de estante es único por zona. Evitar colisiones al mover.
+            codigos_mueven = {e.codigo for e in estantes}
+            existentes = {
+                c for (c,) in db.query(Estante.codigo).filter(Estante.zona_id == destino.id).all()
+            }
+            colisiones = sorted(codigos_mueven & existentes)
+            if colisiones:
+                raise ConflictError(
+                    f"No se puede mover a '{destino.nombre}': ya tiene estante(s) con código "
+                    f"{', '.join(colisiones)}. Renombralos antes de mover."
+                )
+            for e in estantes:
+                e.zona_id = destino.id
+        else:
+            for e in estantes:
+                e.zona_id = None
+        db.flush()
     db.delete(z)
     db.commit()
+    return len(estantes), destino_nombre
 
 
 # ─── Escritura: Colección (RN-10) ─────────────────────────────────────────────

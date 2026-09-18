@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Save, Plus, Trash2, Loader2, Info, Layers,
-  Shapes, RotateCcw, RotateCw, Copy, ChevronUp,
+  Shapes, RotateCcw, RotateCw, Copy, ChevronUp, Search, X,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
@@ -13,7 +13,7 @@ import { ColorPicker } from "@/shared/components/ui/ColorPicker";
 import { colorEstante } from "@/lib/utils";
 import type { Estante, Anotacion, AnotacionTipo } from "@/shared/types";
 import {
-  listarEstantes, listarZonas, listarAnotaciones,
+  listarEstantes, listarZonas, listarAnotaciones, listarLibros,
   guardarPosiciones, crearEstante, eliminarEstante,
   crearAnotacion, guardarAnotaciones, eliminarAnotacion,
   crearNivel, eliminarNivel,
@@ -23,6 +23,7 @@ import type { Nivel } from "@/shared/types";
 import { EstanteFormModal, siguienteCodigoEstante } from "@/modules/catalogo/EstanteFormModal";
 import { MapaCanvas } from "./MapaCanvas";
 import { EstantePanelInline } from "./EstantePanelInline";
+import { ReubicarEliminarModal } from "./ReubicarEliminarModal";
 import { ZonasModal } from "./ZonasModal";
 import { PaletaElementos, defaultsElemento, etiquetaTipo, iconoTipo } from "./elementos";
 
@@ -42,6 +43,8 @@ export function MapaEditorPage() {
   const [selAnotId, setSelAnotId] = useState<string | null>(null);
   const [zonasModal, setZonasModal] = useState(false);
   const [estanteModal, setEstanteModal] = useState(false);
+  const [borrarEst, setBorrarEst] = useState<Estante | null>(null);
+  const [borrarNivel, setBorrarNivel] = useState<Nivel | null>(null);
   const [paletaAbierta, setPaletaAbierta] = useState(false);
   const [copiedEst, setCopiedEst] = useState<Estante | null>(null);
   const [copiedAnot, setCopiedAnot] = useState<Anotacion | null>(null);
@@ -72,6 +75,29 @@ export function MapaEditorPage() {
 
   const selAnot = localAnot.find((a) => a.id === selAnotId) ?? null;
   const zonaActual = zonas.find((z) => z.id === zonaId) ?? null;
+
+  // ── Buscar un libro y resaltar los estantes que lo contienen (RF-13) ─────────
+  const [q, setQ] = useState("");
+  const busqueda = q.trim().length >= 2 ? q.trim() : ""; // desde 2 caracteres
+  const { data: librosMatch } = useQuery({
+    queryKey: ["libros-buscar", busqueda],
+    queryFn: () => listarLibros({ q: busqueda }),
+    enabled: !!busqueda,
+  });
+  const resaltados = useMemo(() => {
+    if (!busqueda || !librosMatch) return new Set<string>();
+    return new Set(librosMatch.map((l) => l.estante_id).filter((id): id is string => !!id));
+  }, [busqueda, librosMatch]);
+  // Zonas con coincidencias (para orientar cuando el estante está en otro piso).
+  const zonasConMatch = useMemo(() => {
+    if (resaltados.size === 0) return [];
+    return zonas.filter((z) => localEst.some((e) => e.zona_id === z.id && resaltados.has(e.id)));
+  }, [zonas, localEst, resaltados]);
+  // Coincidencias visibles en la zona actual (las que efectivamente brillan).
+  const matchEnZona = useMemo(
+    () => estVisibles.filter((e) => resaltados.has(e.id)).length,
+    [estVisibles, resaltados],
+  );
 
   // ── Guardado en lote (estantes + anotaciones) ───────────────────────────────
   const guardar = useMutation({
@@ -104,12 +130,16 @@ export function MapaEditorPage() {
   }
 
   const eliminarEst = useMutation({
-    mutationFn: eliminarEstante,
-    onSuccess: (_d, id) => {
+    mutationFn: ({ id, reasignarA }: { id: string; reasignarA: string | null }) =>
+      eliminarEstante(id, reasignarA),
+    onSuccess: (_d, { id, reasignarA }) => {
       setLocalEst((prev) => prev.filter((e) => e.id !== id));
       setSelEstId(null);
+      setBorrarEst(null);
       qc.invalidateQueries({ queryKey: ["estantes"] });
-      toast.success("Estante eliminado");
+      qc.invalidateQueries({ queryKey: ["libros"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      toast.success(reasignarA ? "Estante eliminado y libros reasignados" : "Estante eliminado");
     },
     onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo eliminar"),
   });
@@ -131,19 +161,20 @@ export function MapaEditorPage() {
   });
 
   const quitarNiv = useMutation({
-    mutationFn: (nivelId: string) => eliminarNivel(nivelId),
-    onSuccess: (_d, nivelId) => {
+    mutationFn: ({ id, moverA }: { id: string; moverA: string | null }) => eliminarNivel(id, moverA),
+    onSuccess: (_d, { id }) => {
       // Optimista: quitar el nivel y renumerar 1..N (el server hace lo mismo).
       setLocalEst((prev) =>
         prev.map((e) => {
-          if (!e.niveles.some((n) => n.id === nivelId)) return e;
+          if (!e.niveles.some((n) => n.id === id)) return e;
           const niveles = e.niveles
-            .filter((n) => n.id !== nivelId)
+            .filter((n) => n.id !== id)
             .sort((a, b) => a.numero - b.numero)
             .map((n, i) => ({ ...n, numero: i + 1 }));
           return { ...e, niveles };
         }),
       );
+      setBorrarNivel(null);
       qc.invalidateQueries({ queryKey: ["estantes"] });
       qc.invalidateQueries({ queryKey: ["libros"] });
       toast.success("Nivel eliminado");
@@ -205,13 +236,12 @@ export function MapaEditorPage() {
 
   async function eliminarEstanteSel() {
     if (!selEstante) return;
+    // Con libros: modal con opciones (mover a otro estante o dejar sin ubicar).
     if (selEstante.total_libros > 0) {
-      toast.error(
-        `El estante "${selEstante.codigo}" tiene ${selEstante.total_libros} libro(s). ` +
-        "Reasignalos antes de eliminarlo (RN-08).",
-      );
+      setBorrarEst(selEstante);
       return;
     }
+    // Sin libros: confirmación simple.
     const ok = await confirmar({
       mensaje: (
         <>
@@ -219,7 +249,7 @@ export function MapaEditorPage() {
         </>
       ),
     });
-    if (ok) eliminarEst.mutate(selEstante.id);
+    if (ok) eliminarEst.mutate({ id: selEstante.id, reasignarA: null });
   }
 
   // ── Copiar / pegar (Ctrl+C / Ctrl+V) y borrar (Delete) ──────────────────────
@@ -309,8 +339,26 @@ export function MapaEditorPage() {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden">
       <header className="mb-2 shrink-0 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <h1 className="font-serif text-lg font-bold text-stone-900">Editor de mapa</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="shrink-0">
+            <h1 className="font-serif text-lg font-bold leading-tight text-stone-900">Mapa de la Librería</h1>
+            <p className="text-xs text-stone-500">Vista general de estantes y zonas</p>
+          </div>
+          {/* Buscador: localizar un libro y resaltar sus estantes en el plano (RF-13) */}
+          <div className="flex w-64 items-center gap-2 rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 shadow-sm focus-within:border-unla/40 focus-within:ring-2 focus-within:ring-unla/15">
+            <Search className="h-4 w-4 shrink-0 text-stone-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar por título, autor o ISBN…"
+              className="min-w-0 flex-1 bg-transparent text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none"
+            />
+            {q && (
+              <button onClick={() => setQ("")} title="Limpiar" className="shrink-0 text-stone-400 transition-colors hover:text-stone-700">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           {(copiedEst || copiedAnot) && (
             <span className="flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-[10px] text-stone-500">
               <Copy className="h-3 w-3" />
@@ -350,6 +398,33 @@ export function MapaEditorPage() {
         </div>
       </header>
 
+      {/* Resultado de la búsqueda: conteo / estado (RF-13) */}
+      {busqueda && (
+        <p className="mb-2 shrink-0 text-xs text-stone-500">
+          {resaltados.size === 0
+            ? "Sin coincidencias."
+            : matchEnZona > 0
+            ? `${matchEnZona} estante(s) con coincidencias — brillan en dorado. Hacé clic para ver sus libros.`
+            : "Hay coincidencias, pero en otra zona."}
+        </p>
+      )}
+
+      {/* Coincidencias en otra zona: botones para saltar a esa zona */}
+      {busqueda && zonasConMatch.length > 0 && !zonasConMatch.some((z) => z.id === zonaId) && (
+        <p className="mb-2 shrink-0 flex flex-wrap items-center gap-1.5 rounded-lg bg-unla/10 px-2.5 py-1.5 text-xs text-unla">
+          <Search className="h-3.5 w-3.5" /> Coincidencias en otra zona:
+          {zonasConMatch.map((z) => (
+            <button
+              key={z.id}
+              onClick={() => setZonaId(z.id)}
+              className="rounded-md bg-white/70 px-1.5 py-0.5 font-medium underline-offset-2 transition-colors hover:bg-white hover:underline"
+            >
+              {z.nombre}
+            </button>
+          ))}
+        </p>
+      )}
+
       {dirty && (
         <p className="mb-2 shrink-0 flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
           <Info className="h-3.5 w-3.5" /> Tenés cambios sin guardar.
@@ -370,6 +445,7 @@ export function MapaEditorPage() {
                   anotaciones={anotVisibles}
                   textura={zonaActual?.textura ?? null}
                   modo="editar"
+                  resaltados={resaltados}
                   seleccionadoId={selEstId}
                   seleccionadoAnotId={selAnotId}
                   onSeleccionar={(e) => { setSelEstId((prev) => prev === e.id ? null : e.id); setSelAnotId(null); }}
@@ -390,6 +466,7 @@ export function MapaEditorPage() {
                     zonas={zonas}
                     onCerrar={() => setSelEstId(null)}
                     permitirReordenar
+                    filtroInicial={busqueda}
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-stone-200 bg-stone-50/60 text-xs text-stone-400">
@@ -476,12 +553,10 @@ export function MapaEditorPage() {
                       </span>
                       <button
                         onClick={async () => {
-                          if (n.total_libros > 0) {
-                            toast.error(`El Nivel ${n.numero} tiene ${n.total_libros} libro(s). Reasignalos antes de eliminarlo.`);
-                            return;
-                          }
+                          // Con libros: modal con opciones (mover a otro nivel o dejar sin nivel).
+                          if (n.total_libros > 0) { setBorrarNivel(n); return; }
                           const ok = await confirmar({ mensaje: `¿Eliminar el Nivel ${n.numero}?` });
-                          if (ok) quitarNiv.mutate(n.id);
+                          if (ok) quitarNiv.mutate({ id: n.id, moverA: null });
                         }}
                         className="rounded p-0.5 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600"
                         title="Eliminar nivel"
@@ -572,7 +647,67 @@ export function MapaEditorPage() {
         </aside>
       </div>
 
-      {zonasModal && <ZonasModal zonas={zonas} onClose={() => setZonasModal(false)} />}
+      {borrarEst && (
+        <ReubicarEliminarModal
+          titulo={`Eliminar estante “${borrarEst.codigo}”`}
+          advertencia={
+            <>
+              Este estante tiene <strong className="font-semibold text-stone-800">{borrarEst.total_libros} libro(s)</strong>.
+              Al eliminarlo no se borra ningún libro: elegí qué hacer con ellos.
+            </>
+          }
+          dejar={{
+            label: "Dejar los libros sin ubicar",
+            descripcion: "Quedan en “Sin ubicar” y los reacomodás después desde el catálogo.",
+          }}
+          mover={{
+            label: "Mover los libros a otro estante",
+            descripcion: "Se reasignan al estante que elijas (a su primer nivel).",
+            placeholder: "Elegí un estante…",
+            opciones: localEst
+              .filter((e) => e.id !== borrarEst.id)
+              .map((e) => ({
+                id: e.id,
+                label: `${e.codigo}${e.etiqueta ? ` · ${e.etiqueta}` : ""} — ${zonas.find((z) => z.id === e.zona_id)?.nombre ?? "Sin zona"}`,
+              })),
+            sinOpciones: "No hay otros estantes disponibles.",
+          }}
+          onClose={() => setBorrarEst(null)}
+          onConfirmar={(reasignarA) => eliminarEst.mutate({ id: borrarEst.id, reasignarA })}
+          pending={eliminarEst.isPending}
+        />
+      )}
+
+      {borrarNivel && selEstante && (
+        <ReubicarEliminarModal
+          titulo={`Eliminar Nivel ${borrarNivel.numero}`}
+          advertencia={
+            <>
+              Este nivel tiene <strong className="font-semibold text-stone-800">{borrarNivel.total_libros} libro(s)</strong>.
+              Al eliminarlo no se borra ningún libro: elegí qué hacer con ellos.
+            </>
+          }
+          dejar={{
+            label: "Dejar los libros sin nivel",
+            descripcion: "Quedan en el estante, sin un nivel asignado.",
+          }}
+          mover={{
+            label: "Mover los libros a otro nivel",
+            descripcion: "Se reasignan al nivel que elijas de este estante.",
+            placeholder: "Elegí un nivel…",
+            opciones: [...selEstante.niveles]
+              .filter((n) => n.id !== borrarNivel.id)
+              .sort((a, b) => a.numero - b.numero)
+              .map((n) => ({ id: n.id, label: `Nivel ${n.numero}${n.etiqueta ? ` · ${n.etiqueta}` : ""}` })),
+            sinOpciones: "Este estante no tiene otros niveles.",
+          }}
+          onClose={() => setBorrarNivel(null)}
+          onConfirmar={(moverA) => quitarNiv.mutate({ id: borrarNivel.id, moverA })}
+          pending={quitarNiv.isPending}
+        />
+      )}
+
+      {zonasModal && <ZonasModal zonas={zonas} estantes={localEst} onClose={() => setZonasModal(false)} />}
 
       {estanteModal && (
         <EstanteFormModal
