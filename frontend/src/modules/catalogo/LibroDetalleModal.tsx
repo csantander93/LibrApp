@@ -35,7 +35,8 @@ function Campo({ etiqueta, children }: { etiqueta: string; children: React.React
 interface Props {
   libro: Libro | null;
   onClose: () => void;
-  onEditar: (libro: Libro) => void;
+  /** Si se omite, el modal es de solo lectura (sin botón "Editar"): vista pública. */
+  onEditar?: (libro: Libro) => void;
 }
 
 export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
@@ -97,9 +98,11 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
 
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="outline" onClick={onClose}>Cerrar</Button>
-        <Button onClick={() => onEditar(libro)}>
-          <Pencil className="h-4 w-4" /> Editar
-        </Button>
+        {onEditar && (
+          <Button onClick={() => onEditar(libro)}>
+            <Pencil className="h-4 w-4" /> Editar
+          </Button>
+        )}
       </div>
     </Modal>
   );
