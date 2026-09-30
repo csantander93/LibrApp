@@ -46,6 +46,7 @@ export function MapaEditorPage() {
   const [borrarEst, setBorrarEst] = useState<Estante | null>(null);
   const [borrarNivel, setBorrarNivel] = useState<Nivel | null>(null);
   const [paletaAbierta, setPaletaAbierta] = useState(false);
+  const [expandido, setExpandido] = useState(false);
   const [copiedEst, setCopiedEst] = useState<Estante | null>(null);
   const [copiedAnot, setCopiedAnot] = useState<Anotacion | null>(null);
 
@@ -310,6 +311,7 @@ export function MapaEditorPage() {
   // fresco de cada render sin re-suscribir el evento).
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   onKeyRef.current = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && expandido) { setExpandido(false); return; }
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
@@ -337,7 +339,13 @@ export function MapaEditorPage() {
   }, []);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden">
+    <div
+      className={
+        expandido
+          ? "fixed inset-0 z-40 flex h-screen flex-col overflow-hidden bg-stone-50 p-3"
+          : "flex h-[calc(100vh-4rem)] flex-col overflow-hidden"
+      }
+    >
       <header className="mb-2 shrink-0 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
           <div className="shrink-0">
@@ -437,29 +445,38 @@ export function MapaEditorPage() {
             <div className="flex flex-1 items-center justify-center text-stone-400">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
-          ) : (
-            <>
-              <div className="min-h-0" style={{ flex: 6 }}>
-                <MapaCanvas
-                  estantes={estVisibles}
-                  anotaciones={anotVisibles}
-                  textura={zonaActual?.textura ?? null}
-                  modo="editar"
-                  resaltados={resaltados}
-                  seleccionadoId={selEstId}
-                  seleccionadoAnotId={selAnotId}
-                  onSeleccionar={(e) => { setSelEstId((prev) => prev === e.id ? null : e.id); setSelAnotId(null); }}
-                  onSeleccionarAnotacion={(a) => { setSelAnotId(a.id); setSelEstId(null); }}
-                  onMover={(id, x, y) => patchEst(id, { pos_x: x, pos_y: y })}
-                  onResize={(id, w, h) => patchEst(id, { ancho: w, alto: h })}
-                  onRotar={(id, r) => patchEst(id, { rotacion: r })}
-                  onMoverAnotacion={(id, x, y) => patchAnot(id, { pos_x: x, pos_y: y })}
-                  onResizeAnotacion={(id, w, h) => patchAnot(id, { ancho: w, alto: h })}
-                  onRotarAnotacion={(id, r) => patchAnot(id, { rotacion: r })}
-                  onAgregar={agregarEstante}
-                />
-              </div>
-              <div className="min-h-[240px]" style={{ flex: 4 }}>
+          ) : (() => {
+            const canvas = (
+              <MapaCanvas
+                estantes={estVisibles}
+                anotaciones={anotVisibles}
+                textura={zonaActual?.textura ?? null}
+                modo="editar"
+                resaltados={resaltados}
+                seleccionadoId={selEstId}
+                seleccionadoAnotId={selAnotId}
+                onSeleccionar={(e) => { setSelEstId((prev) => prev === e.id ? null : e.id); setSelAnotId(null); }}
+                onSeleccionarAnotacion={(a) => { setSelAnotId(a.id); setSelEstId(null); }}
+                onMover={(id, x, y) => patchEst(id, { pos_x: x, pos_y: y })}
+                onResize={(id, w, h) => patchEst(id, { ancho: w, alto: h })}
+                onRotar={(id, r) => patchEst(id, { rotacion: r })}
+                onMoverAnotacion={(id, x, y) => patchAnot(id, { pos_x: x, pos_y: y })}
+                onResizeAnotacion={(id, w, h) => patchAnot(id, { ancho: w, alto: h })}
+                onRotarAnotacion={(id, r) => patchAnot(id, { rotacion: r })}
+                onAgregar={agregarEstante}
+                expandido={expandido}
+                onExpandir={() => setExpandido((v) => !v)}
+              />
+            );
+            // En modo expandido priorizamos espacio para el canvas: el panel de
+            // libros del estante (abajo) se oculta, se recupera al salir.
+            if (expandido) {
+              return <div className="min-h-0 flex-1">{canvas}</div>;
+            }
+            return (
+              <>
+                <div className="min-h-0" style={{ flex: 6 }}>{canvas}</div>
+                <div className="min-h-[240px]" style={{ flex: 4 }}>
                 {selEstante ? (
                   <EstantePanelInline
                     estante={selEstante}
@@ -475,7 +492,8 @@ export function MapaEditorPage() {
                 )}
               </div>
             </>
-          )}
+          );
+          })()}
         </div>
 
         {/* Panel lateral contextual */}

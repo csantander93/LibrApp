@@ -1,5 +1,5 @@
 import { useRef, type PointerEvent } from "react";
-import { Pencil, Plus, RotateCw } from "lucide-react";
+import { Pencil, Plus, RotateCw, Maximize2, Minimize2 } from "lucide-react";
 import { cn, colorEstante, oscurecer } from "@/lib/utils";
 import type { Estante, Anotacion, TexturaPiso } from "@/shared/types";
 import { renderElemento, claseTextura } from "./elementos";
@@ -23,6 +23,9 @@ interface Props {
   onRotarAnotacion?: (id: string, rotacion: number) => void;
   onEditar?: () => void;
   onAgregar?: () => void;
+  /** Si se pasa, muestra un botón flotante para expandir/contraer el mapa. */
+  expandido?: boolean;
+  onExpandir?: () => void;
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -59,6 +62,7 @@ export function MapaCanvas({
   seleccionadoId, seleccionadoAnotId, resaltados,
   onSeleccionar, onSeleccionarAnotacion, onMover, onResize, onRotar,
   onMoverAnotacion, onResizeAnotacion, onRotarAnotacion, onEditar, onAgregar,
+  expandido, onExpandir,
 }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<DragState | null>(null);
@@ -183,7 +187,7 @@ export function MapaCanvas({
   );
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" onDoubleClick={onExpandir}>
       <div className="h-full w-full overflow-hidden rounded-2xl border border-stone-300/80 shadow-inner shadow-stone-900/10">
         <div ref={canvasRef} className={cn("map-floor relative h-full w-full", claseTextura(textura))}>
           <div className="pointer-events-none absolute inset-2 z-0 rounded border-[2.5px] border-stone-400/70" />
@@ -271,8 +275,13 @@ export function MapaCanvas({
         </div>
       </div>
 
-      {(onEditar || onAgregar) && (
+      {(onEditar || onAgregar || onExpandir) && (
         <div className="absolute right-3 top-3 flex flex-col gap-2">
+          {onExpandir && (
+            <CtrlBtn label={expandido ? "Salir de pantalla completa" : "Expandir el mapa"} onClick={onExpandir}>
+              {expandido ? <Minimize2 className="h-[18px] w-[18px]" /> : <Maximize2 className="h-[18px] w-[18px]" />}
+            </CtrlBtn>
+          )}
           {onEditar && (
             <CtrlBtn label="Editar mapa" onClick={onEditar}>
               <Pencil className="h-[18px] w-[18px]" />
