@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, BookOpen, Map, LibrarySquare, Upload, Settings, ScrollText, LogOut } from "lucide-react";
+import { LayoutDashboard, BookOpen, Map, LibrarySquare, Settings, ScrollText, LogOut } from "lucide-react";
 import { useAuth } from "@/modules/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,6 @@ const nav = [
   { to: "/admin/catalogo", label: "Catálogo", icon: BookOpen, permiso: ["catalogo.gestionar"] },
   { to: "/admin/estantes", label: "Estantes", icon: LibrarySquare, permiso: ["estantes.gestionar"] },
   { to: "/admin/mapa", label: "Mapa", icon: Map, permiso: ["mapa.gestionar"] },
-  { to: "/admin/importar", label: "Importar", icon: Upload, permiso: ["importar.ejecutar"] },
   { to: "/admin/registros", label: "Registros", icon: ScrollText, permiso: ["registros.ver"] },
   { to: "/admin/configuracion", label: "Configuración", icon: Settings, permiso: ["configuracion.editar", "usuarios.gestionar"] },
 ];

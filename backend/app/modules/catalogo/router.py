@@ -3,14 +3,15 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query, Response, statu
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import audit_ctx, AuditContext
+from app.core.deps import audit_ctx, AuditContext, require_permiso
 from app.modules.auth import permisos as P
+from app.modules.auth.models import Usuario
 from app.modules.catalogo import service, importer
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, ColeccionResponse, ZonaResponse,
     LibroCreate, LibroUpdate, PrecioUpdate,
     EstanteCreate, EstanteUpdate, ColeccionCreate, ImportResultado,
-    PosicionesUpdate, ZonaCreate, ZonaUpdate, LibrosOrdenUpdate,
+    PosicionesUpdate, ZonaCreate, ZonaUpdate, LibrosOrdenUpdate, IdsRequest,
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
     LibroImagenResponse,
@@ -27,6 +28,7 @@ AUDIT = Depends(audit_ctx(P.CATALOGO))        # libros, colecciones, campos, im�
 AUDIT_EST = Depends(audit_ctx(P.ESTANTES))    # estantes, niveles, zonas
 AUDIT_MAPA = Depends(audit_ctx(P.MAPA))       # posiciones, anotaciones, orden de libros
 AUDIT_IMP = Depends(audit_ctx(P.IMPORTAR))    # importación Excel/CSV
+AUDIT_DEL = Depends(audit_ctx(P.ELIMINAR))    # borrado en lote y purga (acciones peligrosas)
 
 # Módulo con el que se etiquetan todas las acciones de este router en el log.
 _MODULO = "Catálogo"
@@ -108,6 +110,22 @@ def guardar_orden_libros(data: LibrosOrdenUpdate, db: Session = Depends(get_db),
     return {"actualizados": actualizados}
 
 
+# Declarado ANTES de /libros/{libro_id} para que "plantilla" no se parsee como UUID.
+# Descarga la "bandeja" vacía a completar para importar (RF-05 / CU-04).
+@router.get("/libros/plantilla")
+def descargar_plantilla(
+    formato: str = Query("csv", pattern="^(csv|xlsx)$"),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_permiso(P.IMPORTAR)),
+):
+    contenido, filename, content_type = importer.generar_plantilla(db, formato)
+    return Response(
+        content=contenido,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/libros", response_model=LibroResponse, status_code=status.HTTP_201_CREATED)
 def crear_libro(data: LibroCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
     obj = service.crear_libro(db, data)
@@ -136,6 +154,22 @@ def eliminar_libro(libro_id: uuid.UUID, db: Session = Depends(get_db), audit: Au
     titulo = libro.titulo
     service.eliminar_libro(db, libro_id)
     audit.registrar_accion(f"Eliminó el libro '{titulo}'", modulo=_MODULO, accion="Eliminación")
+
+
+# ─── Borrado en lote y purga (acciones peligrosas — permiso eliminar.ejecutar) ─
+
+@router.post("/libros/eliminar-lote")
+def eliminar_libros_lote(data: IdsRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT_DEL):
+    n = service.eliminar_libros_lote(db, data.ids)
+    audit.registrar_accion(f"Eliminó {n} libro(s) en lote", modulo=_MODULO, accion="Eliminación")
+    return {"eliminados": n}
+
+
+@router.post("/libros/purgar")
+def purgar_catalogo(db: Session = Depends(get_db), audit: AuditContext = AUDIT_DEL):
+    n = service.purgar_catalogo(db)
+    audit.registrar_accion(f"Purgó el catálogo ({n} libros eliminados)", modulo=_MODULO, accion="Eliminación")
+    return {"eliminados": n}
 
 
 # ─── Imágenes del libro (RF-04) ───────────────────────────────────────────────
@@ -225,6 +259,16 @@ def eliminar_estante(
     else:
         detalle = ""
     audit.registrar_accion(f"Eliminó el estante '{codigo}'{detalle}", modulo=_MODULO, accion="Eliminación")
+
+
+@router.post("/estantes/eliminar-lote")
+def eliminar_estantes_lote(data: IdsRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT_DEL):
+    eliminados, desubicados = service.eliminar_estantes_lote(db, data.ids)
+    audit.registrar_accion(
+        f"Eliminó {eliminados} estante(s) en lote y dejó {desubicados} libro(s) sin ubicar",
+        modulo=_MODULO, accion="Eliminación",
+    )
+    return {"eliminados": eliminados, "desubicados": desubicados}
 
 
 # ─── Escritura: Niveles ("pisos" del estante — RF-02) ─────────────────────────

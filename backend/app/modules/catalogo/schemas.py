@@ -208,6 +208,12 @@ class LibrosOrdenUpdate(BaseModel):
     libros: list[LibroOrdenItem]
 
 
+# ─── Borrado en lote (selección múltiple) ─────────────────────────────────────
+
+class IdsRequest(BaseModel):
+    ids: list[uuid.UUID]
+
+
 # ─── Escritura: Estante (RF-02) ───────────────────────────────────────────────
 
 class EstanteCreate(BaseModel):

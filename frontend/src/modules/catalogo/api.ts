@@ -87,6 +87,29 @@ export async function eliminarLibro(id: string): Promise<void> {
   await api.delete(`/catalogo/libros/${id}`);
 }
 
+// ─── Borrado en lote y purga (permiso eliminar.ejecutar) ──────────────────────
+
+/** Borra en lote los libros indicados. Devuelve cuántos se eliminaron. */
+export async function eliminarLibrosLote(ids: string[]): Promise<number> {
+  const { data } = await api.post<{ eliminados: number }>("/catalogo/libros/eliminar-lote", { ids });
+  return data.eliminados;
+}
+
+/** Purga TODO el catálogo de libros (acción peligrosa). Devuelve cuántos se eliminaron. */
+export async function purgarCatalogo(): Promise<number> {
+  const { data } = await api.post<{ eliminados: number }>("/catalogo/libros/purgar");
+  return data.eliminados;
+}
+
+/** Borra en lote los estantes indicados; sus libros quedan 'Sin ubicar'. */
+export async function eliminarEstantesLote(ids: string[]): Promise<{ eliminados: number; desubicados: number }> {
+  const { data } = await api.post<{ eliminados: number; desubicados: number }>(
+    "/catalogo/estantes/eliminar-lote",
+    { ids },
+  );
+  return data;
+}
+
 // ─── Orden manual de libros (drag & drop de lomos en el mapa) ──────────────────
 
 export interface LibroOrden {
@@ -268,6 +291,26 @@ export async function crearColeccion(nombre: string): Promise<Coleccion> {
 }
 
 // ─── Importación ──────────────────────────────────────────────────────────────
+
+/** Descarga la plantilla ("bandeja") vacía a completar, en CSV o XLSX. */
+export async function descargarPlantilla(formato: "csv" | "xlsx"): Promise<void> {
+  const { data, headers } = await api.get("/catalogo/libros/plantilla", {
+    params: { formato },
+    responseType: "blob",
+  });
+  // Nombre del archivo: el que manda el backend (Content-Disposition) o uno por defecto.
+  const disp = (headers["content-disposition"] as string | undefined) ?? "";
+  const match = disp.match(/filename="?([^"]+)"?/);
+  const nombre = match?.[1] ?? `plantilla_importacion_librapp.${formato}`;
+  const url = URL.createObjectURL(data as Blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export async function importarLibros(archivo: File, dryRun: boolean): Promise<ImportResultado> {
   const form = new FormData();

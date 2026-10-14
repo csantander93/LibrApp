@@ -1,17 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid, SlidersHorizontal } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid, SlidersHorizontal, Upload, Bomb } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
+import { useAuth } from "@/modules/auth/AuthContext";
 import { cn } from "@/lib/utils";
 import type { Libro } from "@/shared/types";
-import { listarLibros, listarColecciones, listarEstantes, eliminarLibro, urlImagenLibro } from "./api";
+import { listarLibros, listarColecciones, listarEstantes, eliminarLibro, eliminarLibrosLote, purgarCatalogo, urlImagenLibro } from "./api";
 import { LibroFormModal } from "./LibroFormModal";
 import { LibroDetalleModal } from "./LibroDetalleModal";
 import { CamposLibroManager } from "./CamposLibroManager";
+import { ImportarModal } from "./ImportarModal";
 import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 
 /** Columnas ordenables del catálogo. */
@@ -63,6 +65,7 @@ export function CatalogoPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirmar = useConfirm();
+  const { tienePermiso } = useAuth();
   const [q, setQ] = useState("");
   const [coleccionId, setColeccionId] = useState("");
   const [estanteId, setEstanteId] = useState("");
@@ -75,6 +78,10 @@ export function CatalogoPage() {
   const [libroEdit, setLibroEdit] = useState<Libro | null>(null);
   const [libroDetalle, setLibroDetalle] = useState<Libro | null>(null);
   const [camposAbierto, setCamposAbierto] = useState(false);
+  const [importarAbierto, setImportarAbierto] = useState(false);
+  const puedeEliminar = tienePermiso("eliminar.ejecutar");
+  // Selección múltiple para borrado en lote (ids de libros).
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
 
   const filtros = {
     q: q.trim().length >= 2 ? q.trim() : undefined,
@@ -101,6 +108,75 @@ export function CatalogoPage() {
     onError: (err: any) =>
       toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el libro"),
   });
+
+  // Invalidaciones comunes tras un borrado (lista, dashboard y conteos de estantes).
+  const invalidarTrasBorrado = () => {
+    qc.invalidateQueries({ queryKey: ["libros"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
+    qc.invalidateQueries({ queryKey: ["estantes"] });
+  };
+
+  const eliminarLote = useMutation({
+    mutationFn: () => eliminarLibrosLote([...seleccion]),
+    onSuccess: (n) => {
+      invalidarTrasBorrado();
+      setSeleccion(new Set());
+      toast.success(`${n} libro(s) eliminado(s)`);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudieron eliminar los libros"),
+  });
+
+  const purgar = useMutation({
+    mutationFn: purgarCatalogo,
+    onSuccess: (n) => {
+      invalidarTrasBorrado();
+      setSeleccion(new Set());
+      toast.success(`Catálogo purgado · ${n} libro(s) eliminado(s)`);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudo purgar el catálogo"),
+  });
+
+  // Helpers de selección.
+  const toggleSel = (id: string) =>
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  // Al cambiar los filtros, la selección previa deja de ser visible: se limpia.
+  useEffect(() => { setSeleccion(new Set()); }, [q, coleccionId, estanteId, soloSinUbicar]);
+
+  async function confirmarEliminarLote() {
+    const n = seleccion.size;
+    const ok = await confirmar({
+      tono: "danger",
+      titulo: "Eliminar seleccionados",
+      confirmar: `Eliminar ${n}`,
+      mensaje: (
+        <>
+          ¿Eliminar <strong className="font-semibold text-stone-800">{n}</strong> libro(s)
+          seleccionado(s)? Esta acción no se puede deshacer.
+        </>
+      ),
+    });
+    if (ok) eliminarLote.mutate();
+  }
+
+  async function confirmarPurgar() {
+    const ok = await confirmar({
+      tono: "danger",
+      titulo: "Purgar catálogo",
+      confirmar: "Purgar todo",
+      mensaje: (
+        <>
+          <strong className="font-semibold text-red-600">Acción peligrosa e irreversible.</strong>{" "}
+          Vas a borrar <strong>todos</strong> los libros del catálogo, incluidas sus imágenes.
+          Las colecciones, campos personalizados, estantes y zonas se conservan.
+        </>
+      ),
+    });
+    if (ok) purgar.mutate();
+  }
 
   // Ordenamiento en 3 estados por columna (desc → asc → sin orden). Los nulos van al final.
   const librosOrdenados = useMemo(() => {
@@ -142,6 +218,17 @@ export function CatalogoPage() {
     () => librosOrdenados.slice((paginaActual - 1) * pageSize, paginaActual * pageSize),
     [librosOrdenados, paginaActual, pageSize],
   );
+
+  // Selección de "todos los visibles" (de la página actual).
+  const todosVisiblesSel = visibles.length > 0 && visibles.every((l) => seleccion.has(l.id));
+  function toggleTodosVisibles() {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      if (todosVisiblesSel) visibles.forEach((l) => next.delete(l.id));
+      else visibles.forEach((l) => next.add(l.id));
+      return next;
+    });
+  }
 
   function abrirAlta() {
     setLibroEdit(null);
@@ -199,6 +286,17 @@ export function CatalogoPage() {
           <p className="text-sm text-stone-500">{total} libro(s) en el inventario.</p>
         </div>
         <div className="flex items-center gap-2">
+          {puedeEliminar && (
+            <Button variant="danger" onClick={confirmarPurgar} disabled={purgar.isPending} title="Borrar todos los libros del catálogo">
+              {purgar.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bomb className="h-4 w-4" />}
+              Purgar catálogo
+            </Button>
+          )}
+          {tienePermiso("importar.ejecutar") && (
+            <Button variant="outline" onClick={() => setImportarAbierto(true)}>
+              <Upload className="h-4 w-4" /> Importar
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setCamposAbierto(true)}>
             <SlidersHorizontal className="h-4 w-4" /> Campos personalizados
           </Button>
@@ -267,6 +365,22 @@ export function CatalogoPage() {
         </div>
       </div>
 
+      {/* Barra contextual de borrado en lote (solo con permiso y con selección) */}
+      {puedeEliminar && seleccion.size > 0 && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+          <span className="text-sm font-medium text-red-800">
+            {seleccion.size} libro(s) seleccionado(s)
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setSeleccion(new Set())}>Limpiar</Button>
+            <Button variant="danger" onClick={confirmarEliminarLote} disabled={eliminarLote.isPending}>
+              {eliminarLote.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Eliminar seleccionados ({seleccion.size})
+            </Button>
+          </div>
+        </div>
+      )}
+
       {isLoading && (
         <div className="flex justify-center py-16 text-slate-400">
           <Loader2 className="h-6 w-6 animate-spin" />
@@ -284,6 +398,17 @@ export function CatalogoPage() {
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
+                {puedeEliminar && (
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={todosVisiblesSel}
+                      onChange={toggleTodosVisibles}
+                      aria-label="Seleccionar todos"
+                      className="h-4 w-4 rounded border-stone-300 text-unla focus:ring-unla/40"
+                    />
+                  </th>
+                )}
                 <EncabezadoOrden campo="titulo">Título</EncabezadoOrden>
                 <EncabezadoOrden campo="autor">Autor</EncabezadoOrden>
                 <EncabezadoOrden campo="editorial">Editorial</EncabezadoOrden>
@@ -297,9 +422,20 @@ export function CatalogoPage() {
               {visibles.map((libro) => (
                 <tr
                   key={libro.id}
-                  className="cursor-pointer hover:bg-slate-50"
+                  className={cn("cursor-pointer hover:bg-slate-50", seleccion.has(libro.id) && "bg-unla/5")}
                   onClick={() => setLibroDetalle(libro)}
                 >
+                  {puedeEliminar && (
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={seleccion.has(libro.id)}
+                        onChange={() => toggleSel(libro.id)}
+                        aria-label={`Seleccionar ${libro.titulo}`}
+                        className="h-4 w-4 rounded border-stone-300 text-unla focus:ring-unla/40"
+                      />
+                    </td>
+                  )}
                   <td className="px-4 py-3 font-medium text-slate-900">{libro.titulo}</td>
                   <td className="px-4 py-3 text-slate-600">{libro.autor}</td>
                   <td className="px-4 py-3 text-slate-600">{libro.editorial}</td>
@@ -338,8 +474,21 @@ export function CatalogoPage() {
             <div
               key={libro.id}
               onClick={() => setLibroDetalle(libro)}
-              className="flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-slate-50"
+              className={cn(
+                "flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-slate-50",
+                seleccion.has(libro.id) && "bg-unla/5",
+              )}
             >
+              {puedeEliminar && (
+                <input
+                  type="checkbox"
+                  checked={seleccion.has(libro.id)}
+                  onChange={() => toggleSel(libro.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Seleccionar ${libro.titulo}`}
+                  className="h-4 w-4 shrink-0 rounded border-stone-300 text-unla focus:ring-unla/40"
+                />
+              )}
               <Portada
                 libro={libro}
                 className="h-20 w-14 shrink-0 rounded-md shadow-sm ring-1 ring-black/5"
@@ -384,9 +533,22 @@ export function CatalogoPage() {
             <div
               key={libro.id}
               onClick={() => setLibroDetalle(libro)}
-              className="group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+              className={cn(
+                "group flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md",
+                seleccion.has(libro.id) ? "border-unla ring-1 ring-unla" : "border-slate-200",
+              )}
             >
               <div className="relative aspect-[3/4] overflow-hidden bg-slate-100">
+                {puedeEliminar && (
+                  <input
+                    type="checkbox"
+                    checked={seleccion.has(libro.id)}
+                    onChange={() => toggleSel(libro.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Seleccionar ${libro.titulo}`}
+                    className="absolute left-1.5 top-1.5 z-10 h-4 w-4 rounded border-stone-300 bg-white/90 text-unla shadow-sm focus:ring-unla/40"
+                  />
+                )}
                 {libro.imagenes.length > 0 ? (
                   <img
                     src={urlImagenLibro(libro.imagenes[0])}
@@ -458,6 +620,8 @@ export function CatalogoPage() {
       />
 
       <CamposLibroManager abierto={camposAbierto} onClose={() => setCamposAbierto(false)} />
+
+      <ImportarModal abierto={importarAbierto} onClose={() => setImportarAbierto(false)} />
     </div>
   );
 }

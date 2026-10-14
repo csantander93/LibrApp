@@ -309,6 +309,29 @@ def eliminar_libro(db: Session, libro_id: uuid.UUID) -> None:
     db.commit()
 
 
+def eliminar_libros_lote(db: Session, ids: list[uuid.UUID]) -> int:
+    """Borra en lote los libros indicados (selección múltiple). Las imágenes caen
+    por el FK `imagenes_libro.libro_id` con ondelete CASCADE. Devuelve cuántos se
+    borraron."""
+    if not ids:
+        return 0
+    eliminados = (
+        db.query(Libro).filter(Libro.id.in_(ids)).delete(synchronize_session=False)
+    )
+    db.commit()
+    return eliminados
+
+
+def purgar_catalogo(db: Session) -> int:
+    """Borra TODOS los libros del catálogo (acción peligrosa, gateada por el permiso
+    `eliminar.ejecutar`). Conserva colecciones, campos, estantes y zonas. Las imágenes
+    caen en cascada. Devuelve cuántos libros se eliminaron."""
+    total = db.query(func.count(Libro.id)).scalar() or 0
+    db.query(Libro).delete(synchronize_session=False)
+    db.commit()
+    return total
+
+
 # ─── Imágenes del libro (portada / vistas) ────────────────────────────────────
 
 # Tope de imágenes por libro y tamaño máximo por archivo (5 MB). Tipos aceptados:
@@ -570,6 +593,23 @@ def eliminar_estante(
     db.delete(e)
     db.commit()
     return len(libros), destino_codigo
+
+
+def eliminar_estantes_lote(db: Session, ids: list[uuid.UUID]) -> tuple[int, int]:
+    """Borra en lote los estantes indicados (selección múltiple). Los libros de esos
+    estantes quedan 'Sin ubicar' (RN-07/RN-09): borrar el estante hace SET NULL en
+    `libros.estante_id` (FK ondelete SET NULL) y la cascada de `niveles` deja
+    `libros.nivel_id` en NULL. Devuelve (estantes_eliminados, libros_desubicados)."""
+    if not ids:
+        return 0, 0
+    desubicados = (
+        db.query(func.count(Libro.id)).filter(Libro.estante_id.in_(ids)).scalar() or 0
+    )
+    eliminados = (
+        db.query(Estante).filter(Estante.id.in_(ids)).delete(synchronize_session=False)
+    )
+    db.commit()
+    return eliminados, desubicados
 
 
 # ─── Escritura: Niveles ("pisos" del estante) ─────────────────────────────────
