@@ -6,6 +6,7 @@ import { RequierePermiso } from "@/shared/components/RequierePermiso";
 import { AdminLayout } from "@/shared/components/AdminLayout";
 import { DashboardPage } from "@/modules/dashboard/DashboardPage";
 import { CatalogoPage } from "@/modules/catalogo/CatalogoPage";
+import { CategoriasPage } from "@/modules/catalogo/CategoriasPage";
 import { EstantesPage } from "@/modules/catalogo/EstantesPage";
 import { MapaEditorPage } from "@/modules/mapa/MapaEditorPage";
 import { ConfiguracionPage } from "@/modules/configuracion/ConfiguracionPage";
@@ -29,6 +30,7 @@ export function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="catalogo" element={<RequierePermiso permiso="catalogo.gestionar"><CatalogoPage /></RequierePermiso>} />
+        <Route path="categorias" element={<RequierePermiso permiso="catalogo.gestionar"><CategoriasPage /></RequierePermiso>} />
         <Route path="estantes" element={<RequierePermiso permiso="estantes.gestionar"><EstantesPage /></RequierePermiso>} />
         <Route path="mapa" element={<RequierePermiso permiso="mapa.gestionar"><MapaEditorPage /></RequierePermiso>} />
         <Route path="registros" element={<RequierePermiso permiso="registros.ver"><LogsPage /></RequierePermiso>} />

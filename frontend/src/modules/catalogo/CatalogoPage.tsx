@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid, SlidersHorizontal, Upload, Bomb } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid, SlidersHorizontal, Upload, Bomb, Filter, X } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
@@ -9,7 +9,7 @@ import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import { useAuth } from "@/modules/auth/AuthContext";
 import { cn } from "@/lib/utils";
 import type { Libro } from "@/shared/types";
-import { listarLibros, listarColecciones, listarEstantes, eliminarLibro, eliminarLibrosLote, purgarCatalogo, urlImagenLibro } from "./api";
+import { listarLibros, listarColecciones, listarEstantes, eliminarLibro, eliminarLibrosLote, asignarCategoriaLote, purgarCatalogo, urlImagenLibro } from "./api";
 import { LibroFormModal } from "./LibroFormModal";
 import { LibroDetalleModal } from "./LibroDetalleModal";
 import { CamposLibroManager } from "./CamposLibroManager";
@@ -70,6 +70,11 @@ export function CatalogoPage() {
   const [coleccionId, setColeccionId] = useState("");
   const [estanteId, setEstanteId] = useState("");
   const [soloSinUbicar, setSoloSinUbicar] = useState(false);
+  const [precioMin, setPrecioMin] = useState("");
+  const [precioMax, setPrecioMax] = useState("");
+  const [autorFiltro, setAutorFiltro] = useState("");
+  const [editorialFiltro, setEditorialFiltro] = useState("");
+  const [mostrarFiltros, setMostrarFiltros] = useState(false);
   const [pagina, setPagina] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const [orden, setOrden] = useState<Orden | null>(null);
@@ -80,7 +85,11 @@ export function CatalogoPage() {
   const [camposAbierto, setCamposAbierto] = useState(false);
   const [importarAbierto, setImportarAbierto] = useState(false);
   const puedeEliminar = tienePermiso("eliminar.ejecutar");
-  // Selección múltiple para borrado en lote (ids de libros).
+  const puedeGestionar = tienePermiso("catalogo.gestionar");
+  // La selección múltiple sirve para dos acciones: asignar categoría (gestionar) y
+  // borrar en lote (eliminar). Se muestra si el usuario puede alguna de las dos.
+  const puedeSeleccionar = puedeEliminar || puedeGestionar;
+  // Selección múltiple (ids de libros).
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
 
   const filtros = {
@@ -88,7 +97,24 @@ export function CatalogoPage() {
     coleccion_id: coleccionId || undefined,
     estante_id: estanteId || undefined,
     sin_ubicar: soloSinUbicar || undefined,
+    precio_min: precioMin.trim() || undefined,
+    precio_max: precioMax.trim() || undefined,
+    autor: autorFiltro.trim() || undefined,
+    editorial: editorialFiltro.trim() || undefined,
   };
+
+  // Filtros "avanzados" activos (todos menos la búsqueda rápida `q`), para el badge.
+  const filtrosActivos = [
+    coleccionId, estanteId, soloSinUbicar ? "x" : "",
+    precioMin.trim(), precioMax.trim(), autorFiltro.trim(), editorialFiltro.trim(),
+  ].filter(Boolean).length;
+
+  function limpiarFiltros() {
+    setQ("");
+    setColeccionId(""); setEstanteId(""); setSoloSinUbicar(false);
+    setPrecioMin(""); setPrecioMax(""); setAutorFiltro(""); setEditorialFiltro("");
+    setPagina(1);
+  }
 
   const { data: libros, isLoading } = useQuery({
     queryKey: ["libros", filtros],
@@ -126,6 +152,23 @@ export function CatalogoPage() {
     onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudieron eliminar los libros"),
   });
 
+  // Asignar (o quitar, con null) la categoría a los libros seleccionados.
+  const asignarCategoria = useMutation({
+    mutationFn: (coleccionId: string | null) => asignarCategoriaLote([...seleccion], coleccionId),
+    onSuccess: (n, coleccionId) => {
+      qc.invalidateQueries({ queryKey: ["libros"] });
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      const nombre = colecciones.find((c) => c.id === coleccionId)?.nombre;
+      toast.success(
+        coleccionId
+          ? `Categoría "${nombre}" asignada a ${n} libro(s)`
+          : `Categoría quitada a ${n} libro(s)`,
+      );
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail ?? "No se pudo asignar la categoría"),
+  });
+
   const purgar = useMutation({
     mutationFn: purgarCatalogo,
     onSuccess: (n) => {
@@ -144,7 +187,9 @@ export function CatalogoPage() {
       return next;
     });
   // Al cambiar los filtros, la selección previa deja de ser visible: se limpia.
-  useEffect(() => { setSeleccion(new Set()); }, [q, coleccionId, estanteId, soloSinUbicar]);
+  useEffect(() => { setSeleccion(new Set()); }, [
+    q, coleccionId, estanteId, soloSinUbicar, precioMin, precioMax, autorFiltro, editorialFiltro,
+  ]);
 
   async function confirmarEliminarLote() {
     const n = seleccion.size;
@@ -306,8 +351,8 @@ export function CatalogoPage() {
         </div>
       </header>
 
-      {/* Filtros (RF-06 / RF-12) */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      {/* Toolbar: búsqueda rápida + botón Filtros + alternar vista (RF-06 / RF-12) */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="relative min-w-64 flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
@@ -317,30 +362,19 @@ export function CatalogoPage() {
             className="pl-9"
           />
         </div>
-        <Select
-          value={coleccionId}
-          onChange={(e) => { setColeccionId(e.target.value); setPagina(1); }}
-          className="w-52"
+
+        <Button
+          variant={mostrarFiltros || filtrosActivos > 0 ? "primary" : "outline"}
+          onClick={() => setMostrarFiltros((v) => !v)}
         >
-          <option value="">Todas las colecciones</option>
-          {colecciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </Select>
-        <Select
-          value={estanteId}
-          onChange={(e) => { setEstanteId(e.target.value); setPagina(1); }}
-          className="w-48"
-        >
-          <option value="">Todos los estantes</option>
-          {estantes.map((e) => <option key={e.id} value={e.id}>{e.codigo}</option>)}
-        </Select>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={soloSinUbicar}
-            onChange={(e) => { setSoloSinUbicar(e.target.checked); setPagina(1); }}
-          />
-          Solo sin ubicar
-        </label>
+          <Filter className="h-4 w-4" />
+          Filtros
+          {filtrosActivos > 0 && (
+            <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/25 px-1.5 text-xs font-semibold">
+              {filtrosActivos}
+            </span>
+          )}
+        </Button>
 
         {/* Alternar vista: lista · lista con detalles · cuadrícula */}
         <div className="ml-auto inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
@@ -365,18 +399,113 @@ export function CatalogoPage() {
         </div>
       </div>
 
-      {/* Barra contextual de borrado en lote (solo con permiso y con selección) */}
-      {puedeEliminar && seleccion.size > 0 && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
-          <span className="text-sm font-medium text-red-800">
+      {/* Panel de filtros desplegable */}
+      {mostrarFiltros && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Categoría</label>
+              <Select value={coleccionId} onChange={(e) => { setColeccionId(e.target.value); setPagina(1); }}>
+                <option value="">Todas las categorías</option>
+                {colecciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Ubicación (estante)</label>
+              <Select value={estanteId} onChange={(e) => { setEstanteId(e.target.value); setPagina(1); }}>
+                <option value="">Todos los estantes</option>
+                {estantes.map((e) => <option key={e.id} value={e.id}>{e.codigo}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Precio</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number" min={0} inputMode="decimal"
+                  value={precioMin}
+                  onChange={(e) => { setPrecioMin(e.target.value); setPagina(1); }}
+                  placeholder="Desde"
+                />
+                <span className="text-slate-400">–</span>
+                <Input
+                  type="number" min={0} inputMode="decimal"
+                  value={precioMax}
+                  onChange={(e) => { setPrecioMax(e.target.value); setPagina(1); }}
+                  placeholder="Hasta"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Autor</label>
+              <Input
+                value={autorFiltro}
+                onChange={(e) => { setAutorFiltro(e.target.value); setPagina(1); }}
+                placeholder="Ej: Cortázar"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Editorial</label>
+              <Input
+                value={editorialFiltro}
+                onChange={(e) => { setEditorialFiltro(e.target.value); setPagina(1); }}
+                placeholder="Ej: Siglo XXI"
+              />
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={soloSinUbicar}
+                  onChange={(e) => { setSoloSinUbicar(e.target.checked); setPagina(1); }}
+                  className="h-4 w-4 rounded border-stone-300 text-unla focus:ring-unla/40"
+                />
+                Solo sin ubicar
+              </label>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+            <span className="text-xs text-slate-400">
+              {filtrosActivos > 0 ? `${filtrosActivos} filtro(s) activo(s)` : "Sin filtros aplicados"}
+            </span>
+            <Button variant="outline" onClick={limpiarFiltros} disabled={filtrosActivos === 0 && !q.trim()}>
+              <X className="h-4 w-4" /> Limpiar filtros
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Barra contextual de la selección: categorizar (gestionar) y/o borrar (eliminar) */}
+      {puedeSeleccionar && seleccion.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-unla/30 bg-unla/5 px-4 py-2.5">
+          <span className="text-sm font-medium text-stone-800">
             {seleccion.size} libro(s) seleccionado(s)
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => setSeleccion(new Set())}>Limpiar</Button>
-            <Button variant="danger" onClick={confirmarEliminarLote} disabled={eliminarLote.isPending}>
-              {eliminarLote.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Eliminar seleccionados ({seleccion.size})
-            </Button>
+            {puedeGestionar && (
+              <Select
+                value=""
+                disabled={asignarCategoria.isPending}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  asignarCategoria.mutate(v === "__quitar__" ? null : v);
+                  e.currentTarget.value = "";
+                }}
+                className="w-56"
+                aria-label="Asignar categoría a los seleccionados"
+              >
+                <option value="">Asignar categoría…</option>
+                {colecciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                <option value="__quitar__">— Quitar categoría —</option>
+              </Select>
+            )}
+            {puedeEliminar && (
+              <Button variant="danger" onClick={confirmarEliminarLote} disabled={eliminarLote.isPending}>
+                {eliminarLote.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Eliminar seleccionados ({seleccion.size})
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -398,7 +527,7 @@ export function CatalogoPage() {
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
-                {puedeEliminar && (
+                {puedeSeleccionar && (
                   <th className="w-10 px-4 py-3">
                     <input
                       type="checkbox"
@@ -412,7 +541,7 @@ export function CatalogoPage() {
                 <EncabezadoOrden campo="titulo">Título</EncabezadoOrden>
                 <EncabezadoOrden campo="autor">Autor</EncabezadoOrden>
                 <EncabezadoOrden campo="editorial">Editorial</EncabezadoOrden>
-                <EncabezadoOrden campo="coleccion_nombre">Colección</EncabezadoOrden>
+                <EncabezadoOrden campo="coleccion_nombre">Categoría</EncabezadoOrden>
                 <EncabezadoOrden campo="estante_codigo">Ubicación</EncabezadoOrden>
                 <EncabezadoOrden campo="precio" alinear="right">Precio</EncabezadoOrden>
                 <th className="px-4 py-3 text-right font-medium">Acciones</th>
@@ -425,7 +554,7 @@ export function CatalogoPage() {
                   className={cn("cursor-pointer hover:bg-slate-50", seleccion.has(libro.id) && "bg-unla/5")}
                   onClick={() => setLibroDetalle(libro)}
                 >
-                  {puedeEliminar && (
+                  {puedeSeleccionar && (
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
@@ -479,7 +608,7 @@ export function CatalogoPage() {
                 seleccion.has(libro.id) && "bg-unla/5",
               )}
             >
-              {puedeEliminar && (
+              {puedeSeleccionar && (
                 <input
                   type="checkbox"
                   checked={seleccion.has(libro.id)}
@@ -539,7 +668,7 @@ export function CatalogoPage() {
               )}
             >
               <div className="relative aspect-[3/4] overflow-hidden bg-slate-100">
-                {puedeEliminar && (
+                {puedeSeleccionar && (
                   <input
                     type="checkbox"
                     checked={seleccion.has(libro.id)}

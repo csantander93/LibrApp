@@ -96,6 +96,18 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
         ))}
       </dl>
 
+      {/* Sinopsis: panel de lectura serif sobre papel, scrolleable. */}
+      {libro.sinopsis && (
+        <div className="mt-5">
+          <p className="mb-1.5 text-xs uppercase tracking-wide text-slate-400">Sinopsis</p>
+          <div className="max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-papel/60 px-5 py-4 shadow-inner">
+            <p className="whitespace-pre-line text-left font-serif text-[15px] leading-relaxed text-stone-700">
+              {libro.sinopsis}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="outline" onClick={onClose}>Cerrar</Button>
         {onEditar && (

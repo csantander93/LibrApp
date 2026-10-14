@@ -12,6 +12,10 @@ export interface LibroFiltros {
   estante_id?: string;
   nivel_id?: string;
   sin_ubicar?: boolean;
+  precio_min?: string;
+  precio_max?: string;
+  autor?: string;
+  editorial?: string;
 }
 
 export async function listarLibros(filtros: LibroFiltros = {}): Promise<Libro[]> {
@@ -21,6 +25,10 @@ export async function listarLibros(filtros: LibroFiltros = {}): Promise<Libro[]>
   if (filtros.estante_id) params.estante_id = filtros.estante_id;
   if (filtros.nivel_id) params.nivel_id = filtros.nivel_id;
   if (filtros.sin_ubicar) params.sin_ubicar = "true";
+  if (filtros.precio_min) params.precio_min = filtros.precio_min;
+  if (filtros.precio_max) params.precio_max = filtros.precio_max;
+  if (filtros.autor) params.autor = filtros.autor;
+  if (filtros.editorial) params.editorial = filtros.editorial;
   const { data } = await api.get<Libro[]>("/catalogo/libros", { params });
   return data;
 }
@@ -101,6 +109,28 @@ export async function purgarCatalogo(): Promise<number> {
   return data.eliminados;
 }
 
+/** Asigna (o quita, con coleccion_id=null) la categoría a los libros indicados.
+ *  Devuelve cuántos se actualizaron. */
+export async function asignarCategoriaLote(ids: string[], coleccion_id: string | null): Promise<number> {
+  const { data } = await api.post<{ actualizados: number }>(
+    "/catalogo/libros/categoria-lote",
+    { ids, coleccion_id },
+  );
+  return data.actualizados;
+}
+
+/** Ubica en lote los libros indicados en un estante (y opcionalmente un nivel).
+ *  estante_id=null los deja 'Sin ubicar'. Devuelve cuántos se actualizaron. */
+export async function ubicarLibrosLote(
+  ids: string[], estante_id: string | null, nivel_id: string | null,
+): Promise<number> {
+  const { data } = await api.post<{ actualizados: number }>(
+    "/catalogo/libros/ubicar-lote",
+    { ids, estante_id, nivel_id },
+  );
+  return data.actualizados;
+}
+
 /** Borra en lote los estantes indicados; sus libros quedan 'Sin ubicar'. */
 export async function eliminarEstantesLote(ids: string[]): Promise<{ eliminados: number; desubicados: number }> {
   const { data } = await api.post<{ eliminados: number; desubicados: number }>(
@@ -155,6 +185,7 @@ export interface EstanteInput {
   codigo: string;
   etiqueta: string | null;
   zona_id: string | null;
+  coleccion_id?: string | null;
   color?: string | null;
   cantidad_niveles?: number;
 }
@@ -285,9 +316,27 @@ export async function eliminarCampo(id: string): Promise<void> {
 
 // ─── Colecciones (escritura) ──────────────────────────────────────────────────
 
-export async function crearColeccion(nombre: string): Promise<Coleccion> {
-  const { data } = await api.post<Coleccion>("/catalogo/colecciones", { nombre });
+export interface ColeccionInput {
+  nombre: string;
+  descripcion?: string | null;
+}
+
+export async function crearColeccion(nombre: string, descripcion?: string | null): Promise<Coleccion> {
+  const { data } = await api.post<Coleccion>("/catalogo/colecciones", { nombre, descripcion });
   return data;
+}
+
+export async function actualizarColeccion(id: string, input: Partial<ColeccionInput>): Promise<Coleccion> {
+  const { data } = await api.put<Coleccion>(`/catalogo/colecciones/${id}`, input);
+  return data;
+}
+
+/** Elimina una categoría. Si tiene libros: `moverA` = id de otra categoría donde
+ *  reasignarlos, o null/undefined para dejarlos sin categoría (RN-08 análogo). */
+export async function eliminarColeccion(id: string, moverA?: string | null): Promise<void> {
+  await api.delete(`/catalogo/colecciones/${id}`, {
+    params: moverA ? { mover_a: moverA } : undefined,
+  });
 }
 
 // ─── Importación ──────────────────────────────────────────────────────────────

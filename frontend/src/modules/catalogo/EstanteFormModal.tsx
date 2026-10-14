@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Plus } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
@@ -8,7 +8,10 @@ import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { ColorPicker } from "@/shared/components/ui/ColorPicker";
 import type { Estante, Zona } from "@/shared/types";
-import { crearEstante, actualizarEstante, type EstanteInput } from "./api";
+import {
+  crearEstante, actualizarEstante, listarColecciones, crearColeccion,
+  type EstanteInput,
+} from "./api";
 
 /** Próximo código secuencial libre con formato E{n} (E1, E2, E3…). */
 export function siguienteCodigoEstante(estantes: Estante[]): string {
@@ -47,9 +50,31 @@ export function EstanteFormModal({
   const [zonaId, setZonaId] = useState<string | null>(
     estante?.zona_id ?? zonaIdDefault ?? (zonas[0]?.id ?? null),
   );
+  const [coleccionId, setColeccionId] = useState<string | null>(estante?.coleccion_id ?? null);
   const [color, setColor] = useState<string | null>(estante?.color ?? null);
   const [niveles, setNiveles] = useState(3);
   const [error, setError] = useState<string | null>(null);
+  const [creandoCat, setCreandoCat] = useState(false);
+  const [nuevaCat, setNuevaCat] = useState("");
+
+  const { data: colecciones = [] } = useQuery({
+    queryKey: ["colecciones"],
+    queryFn: listarColecciones,
+  });
+
+  // Alta rápida de categoría (colección) sin salir del form.
+  const crearCat = useMutation({
+    mutationFn: () => crearColeccion(nuevaCat.trim()),
+    onSuccess: (col) => {
+      qc.invalidateQueries({ queryKey: ["colecciones"] });
+      setColeccionId(col.id);
+      setNuevaCat("");
+      setCreandoCat(false);
+      toast.success("Categoría creada");
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.detail ?? "No se pudo crear la categoría"),
+  });
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -57,6 +82,7 @@ export function EstanteFormModal({
         codigo: codigo.trim().toUpperCase(),
         etiqueta: etiqueta.trim() || null,
         zona_id: zonaId || null,
+        coleccion_id: coleccionId || null,
         color,
       };
       if (esAlta) {
@@ -109,11 +135,58 @@ export function EstanteFormModal({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">Etiqueta (categoría)</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="block text-sm font-medium text-slate-700">Categoría</label>
+            {!creandoCat && (
+              <button
+                type="button"
+                onClick={() => setCreandoCat(true)}
+                className="flex items-center gap-0.5 text-xs font-medium text-unla hover:text-unla-dark"
+              >
+                <Plus className="h-3 w-3" /> Nueva categoría
+              </button>
+            )}
+          </div>
+          {creandoCat ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={nuevaCat}
+                onChange={(e) => setNuevaCat(e.target.value)}
+                placeholder="Ej: Política, Novela, Terror…"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); if (nuevaCat.trim()) crearCat.mutate(); }
+                }}
+              />
+              <Button
+                type="button"
+                onClick={() => nuevaCat.trim() && crearCat.mutate()}
+                disabled={crearCat.isPending || !nuevaCat.trim()}
+              >
+                {crearCat.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Crear
+              </Button>
+              <Button type="button" variant="outline" onClick={() => { setCreandoCat(false); setNuevaCat(""); }}>
+                Cancelar
+              </Button>
+            </div>
+          ) : (
+            <Select value={coleccionId ?? ""} onChange={(e) => setColeccionId(e.target.value || null)}>
+              <option value="">— Sin categoría —</option>
+              {colecciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </Select>
+          )}
+          <p className="mt-1 text-[11px] text-slate-400">
+            Los libros de esta categoría se ofrecerán al ubicar en este estante.
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Etiqueta</label>
           <Input
             value={etiqueta}
             onChange={(e) => setEtiqueta(e.target.value)}
-            placeholder="Ej: Humanidades, Novedades… (opcional)"
+            placeholder="Nota opcional (ej: Novedades, Ofertas…)"
           />
         </div>
 

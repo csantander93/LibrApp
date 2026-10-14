@@ -10,8 +10,9 @@ from app.modules.catalogo import service, importer
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, ColeccionResponse, ZonaResponse,
     LibroCreate, LibroUpdate, PrecioUpdate,
-    EstanteCreate, EstanteUpdate, ColeccionCreate, ImportResultado,
+    EstanteCreate, EstanteUpdate, ColeccionCreate, ColeccionUpdate, ImportResultado,
     PosicionesUpdate, ZonaCreate, ZonaUpdate, LibrosOrdenUpdate, IdsRequest,
+    CategoriaLoteRequest, UbicarLoteRequest,
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
     LibroImagenResponse,
@@ -50,11 +51,16 @@ def listar_libros(
     estante_id: uuid.UUID | None = None,
     nivel_id: uuid.UUID | None = None,
     sin_ubicar: bool | None = None,
+    precio_min: float | None = None,
+    precio_max: float | None = None,
+    autor: str | None = None,
+    editorial: str | None = None,
     db: Session = Depends(get_db),
 ):
     return service.listar_libros(
         db, q=q, coleccion_id=coleccion_id, estante_id=estante_id,
         nivel_id=nivel_id, sin_ubicar=sin_ubicar,
+        precio_min=precio_min, precio_max=precio_max, autor=autor, editorial=editorial,
     )
 
 
@@ -170,6 +176,32 @@ def purgar_catalogo(db: Session = Depends(get_db), audit: AuditContext = AUDIT_D
     n = service.purgar_catalogo(db)
     audit.registrar_accion(f"Purgó el catálogo ({n} libros eliminados)", modulo=_MODULO, accion="Eliminación")
     return {"eliminados": n}
+
+
+# ─── Acciones en lote sobre la selección: categorizar y ubicar ────────────────
+
+@router.post("/libros/categoria-lote")
+def asignar_categoria_lote(data: CategoriaLoteRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    n = service.asignar_categoria_lote(db, data.ids, data.coleccion_id)
+    if data.coleccion_id is None:
+        detalle = f"Quitó la categoría a {n} libro(s)"
+    else:
+        col = service.obtener_coleccion(db, data.coleccion_id)
+        detalle = f"Asignó la categoría '{col.nombre}' a {n} libro(s)"
+    audit.registrar_accion(detalle, modulo=_MODULO, accion="Edición")
+    return {"actualizados": n}
+
+
+@router.post("/libros/ubicar-lote")
+def ubicar_libros_lote(data: UbicarLoteRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
+    n = service.ubicar_libros_lote(db, data.ids, data.estante_id, data.nivel_id)
+    if data.estante_id is None:
+        detalle = f"Dejó sin ubicar {n} libro(s)"
+    else:
+        est = service.obtener_estante(db, data.estante_id)
+        detalle = f"Ubicó {n} libro(s) en el estante '{est.codigo}'"
+    audit.registrar_accion(detalle, modulo="Mapa", accion="Edición")
+    return {"actualizados": n}
 
 
 # ─── Imágenes del libro (RF-04) ───────────────────────────────────────────────
@@ -374,8 +406,34 @@ def eliminar_zona(
 @router.post("/colecciones", response_model=ColeccionResponse, status_code=status.HTTP_201_CREATED)
 def crear_coleccion(data: ColeccionCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
     obj = service.crear_coleccion(db, data)
-    audit.registrar_accion(f"Creó la colección '{obj.nombre}'", modulo=_MODULO, accion="Creación")
+    audit.registrar_accion(f"Creó la categoría '{obj.nombre}'", modulo=_MODULO, accion="Creación")
     return obj
+
+
+@router.put("/colecciones/{coleccion_id}", response_model=ColeccionResponse)
+def actualizar_coleccion(coleccion_id: uuid.UUID, data: ColeccionUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    obj = service.actualizar_coleccion(db, coleccion_id, data)
+    audit.registrar_accion(_con_cambios(f"Editó la categoría '{obj.nombre}'", obj), modulo=_MODULO, accion="Edición")
+    return obj
+
+
+@router.delete("/colecciones/{coleccion_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_coleccion(
+    coleccion_id: uuid.UUID,
+    mover_a: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT,
+):
+    col = service.obtener_coleccion(db, coleccion_id)
+    nombre = col.nombre
+    movidos, destino = service.eliminar_coleccion(db, coleccion_id, mover_a)
+    if movidos and destino:
+        detalle = f" y movió {movidos} libro(s) a la categoría '{destino}'"
+    elif movidos:
+        detalle = f" y dejó {movidos} libro(s) sin categoría"
+    else:
+        detalle = ""
+    audit.registrar_accion(f"Eliminó la categoría '{nombre}'{detalle}", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Escritura: Campos personalizados (dinámicos) de libros ───────────────────

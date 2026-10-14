@@ -63,6 +63,8 @@ export interface Libro {
   autor: string;
   editorial: string;
   precio: string | null;
+  /** Sinopsis/reseña (texto largo). null = sin sinopsis. */
+  sinopsis: string | null;
   coleccion_id: string | null;
   estante_id: string | null;
   nivel_id: string | null;
@@ -115,6 +117,8 @@ export interface Coleccion {
   id: string;
   nombre: string;
   descripcion: string | null;
+  /** Cantidad de libros en esta categoría (denormalizado). */
+  total_libros: number;
 }
 
 /** Textura del piso del plano de una zona. null/"grilla" = grilla por defecto. */
@@ -150,6 +154,10 @@ export interface Estante {
   rotacion: number;
   /** Color del bloque en el mapa (hex). null = color derivado de la zona. */
   color: string | null;
+  /** Categoría del estante (colección). null = sin categoría. */
+  coleccion_id: string | null;
+  /** Nombre de la categoría, denormalizado para la UI. */
+  coleccion_nombre: string | null;
   total_libros: number;
   niveles: Nivel[];
 }
@@ -248,6 +256,7 @@ export interface LibroInput {
   editorial: string;
   isbn: string | null;
   precio: string | null;
+  sinopsis: string | null;
   coleccion_id: string | null;
   estante_id: string | null;
   nivel_id: string | null;

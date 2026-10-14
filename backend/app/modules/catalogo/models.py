@@ -55,6 +55,12 @@ class Estante(UUIDMixin, TimestampMixin, Base):
     zona_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("zonas.id", ondelete="SET NULL"), nullable=True,
     )
+    # Categoría del estante (reusa Coleccion — la "categoría taxonómica" del libro, RN-10).
+    # Al ubicar libros desde el panel del estante, se pre-filtran los sin ubicar de esta
+    # categoría. Nulo = estante sin categoría. SET NULL: borrar la categoría no rompe.
+    coleccion_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("colecciones.id", ondelete="SET NULL"), nullable=True,
+    )
     pos_x: Mapped[float] = mapped_column(Numeric(8, 2), default=0, nullable=False)
     pos_y: Mapped[float] = mapped_column(Numeric(8, 2), default=0, nullable=False)
     ancho: Mapped[float] = mapped_column(Numeric(8, 2), default=10, nullable=False)
@@ -67,6 +73,7 @@ class Estante(UUIDMixin, TimestampMixin, Base):
     color: Mapped[str | None] = mapped_column(String(9), nullable=True)
 
     zona: Mapped["Zona | None"] = relationship(back_populates="estantes")
+    coleccion: Mapped["Coleccion | None"] = relationship()  # categoría del estante
     libros: Mapped[list["Libro"]] = relationship(back_populates="estante")
     # Niveles ("pisos") del estante — se muestran a la izquierda de los libros en el mapa.
     niveles: Mapped[list["Nivel"]] = relationship(
@@ -151,6 +158,9 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     autor: Mapped[str] = mapped_column(String(255), nullable=False)
     editorial: Mapped[str] = mapped_column(String(100), nullable=False)
     precio: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # Sinopsis/reseña del libro (texto largo libre). Se muestra como panel de lectura
+    # en la ficha (admin y vista pública). Nulo = sin sinopsis cargada.
+    sinopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     coleccion_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("colecciones.id", ondelete="SET NULL"), nullable=True,
