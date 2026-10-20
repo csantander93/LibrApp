@@ -1,7 +1,8 @@
 """Seed idempotente para desarrollo.
 
 Crea (si no existen):
-  - El usuario administrador (credenciales de .env: ADMIN_USERNAME / ADMIN_PASSWORD).
+  - Tres usuarios administradores (`admin` desde .env + `admin2`/`admin3`), todos con
+    rol "Administrador" (acceso total).
   - Una zona "Planta Baja".
   - Colecciones base (categorías taxonómicas — RN-10).
   - Unos estantes de ejemplo posicionados en el plano.
@@ -26,7 +27,7 @@ def bootstrap_dev() -> None:
     db = SessionLocal()
     try:
         rol_admin = _seed_rol_admin(db)
-        _seed_admin(db, rol_admin)
+        _seed_admins(db, rol_admin)
         zona = _seed_zona(db)
         colecciones = _seed_colecciones(db)
         # El demo de mapa (estantes + libros + anotaciones) sólo tiene sentido en una
@@ -58,19 +59,27 @@ def _seed_rol_admin(db) -> Rol:
     return rol
 
 
-def _seed_admin(db, rol_admin: Rol) -> None:
-    existe = db.query(Usuario).filter(Usuario.username == settings.ADMIN_USERNAME).first()
-    if existe:
-        return
-    db.add(Usuario(
-        username=settings.ADMIN_USERNAME,
-        nombre="Administrador",
-        password_hash=hash_password(settings.ADMIN_PASSWORD),
-        rol_id=rol_admin.id,
-        activo=True,
-    ))
-    db.flush()
-    print(f"[seed] Usuario admin '{settings.ADMIN_USERNAME}' creado.", flush=True)
+def _seed_admins(db, rol_admin: Rol) -> None:
+    """Tres administradores con acceso total (idempotente por username). El primero
+    toma sus credenciales del .env (ADMIN_USERNAME/ADMIN_PASSWORD) para que el deploy
+    pueda personalizarlo; admin2/admin3 son cuentas fijas de demo con la misma clave."""
+    cuentas = [
+        (settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD, "Administrador"),
+        ("admin2", "Admin1234!", "Administrador 2"),
+        ("admin3", "Admin1234!", "Administrador 3"),
+    ]
+    for username, password, nombre in cuentas:
+        if db.query(Usuario).filter(Usuario.username == username).first():
+            continue
+        db.add(Usuario(
+            username=username,
+            nombre=nombre,
+            password_hash=hash_password(password),
+            rol_id=rol_admin.id,
+            activo=True,
+        ))
+        db.flush()
+        print(f"[seed] Usuario admin '{username}' creado.", flush=True)
 
 
 def _seed_zona(db) -> Zona:

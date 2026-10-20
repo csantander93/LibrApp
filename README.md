@@ -221,12 +221,14 @@ idempotentes** (usuario admin + zonas + categorías + estantes + libros demo).
 > Los puertos 5175/8000/5434 están elegidos para convivir con otros proyectos en la misma
 > máquina.
 
-**Credenciales de administrador (seed de desarrollo):**
+**Credenciales de administrador (seed):** se siembran **tres** cuentas, todas con rol
+*Administrador* (acceso total):
 
-- Usuario: `admin`
-- Contraseña: `Admin1234!`
+- `admin` / `Admin1234!`
+- `admin2` / `Admin1234!`
+- `admin3` / `Admin1234!`
 
-(Configurables en `backend/.env` → `ADMIN_USERNAME` / `ADMIN_PASSWORD`.)
+(El primero es configurable en `backend/.env` → `ADMIN_USERNAME` / `ADMIN_PASSWORD`.)
 
 ## ⚙️ Variables de entorno
 
@@ -248,6 +250,12 @@ Backend (`backend/.env`, ver `backend/.env.example`):
 Frontend (`frontend/.env`): `VITE_API_URL` se deja **sin definir en dev** a propósito — el
 frontend deriva la API del host desde el que se abre (localhost en la PC o la IP de la PC desde
 el celular en la red). En producción se setea explícita.
+
+## ☁️ Deploy en Railway
+
+El deploy de producción es un **servicio único**: el `Dockerfile` de la raíz compila el
+frontend (Node) y lo sirve desde FastAPI same-origin, junto a un Postgres administrado. Paso a
+paso (variables, seed, verificación) en **[`DEPLOY.md`](DEPLOY.md)**.
 
 ## 🛠 Comandos útiles
 

@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.core.config import get_settings
 from app.modules.auth.router import router as auth_router
@@ -72,3 +75,21 @@ app.include_router(usuarios_router, prefix=API_PREFIX)
 @app.get("/health", tags=["Health"])
 def health():
     return {"status": "ok", "app": settings.APP_NAME}
+
+
+# ─── Frontend (SPA) ───────────────────────────────────────────────────────────
+# En el deploy de producción (servicio único) el build de Vite se copia a
+# backend/static (/app/static en la imagen) y FastAPI lo sirve same-origin. En dev
+# ese directorio no existe y el frontend corre aparte (Vite), así que no se monta.
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+if STATIC_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    # Catch-all declarado ÚLTIMO: las rutas /api/v1/... y /health ya matchearon antes.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        candidato = STATIC_DIR / full_path
+        if full_path and candidato.is_file():
+            return FileResponse(candidato)                   # favicon, vite.svg, etc.
+        return FileResponse(STATIC_DIR / "index.html")       # deep-links de React Router
