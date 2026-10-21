@@ -13,6 +13,7 @@ import {
 import { LibroDetalleModal } from "@/modules/catalogo/LibroDetalleModal";
 import { MapaCanvas } from "@/modules/mapa/MapaCanvas";
 import { EstantePanelInline } from "@/modules/mapa/EstantePanelInline";
+import { Button } from "@/shared/components/ui/Button";
 import { cn } from "@/lib/utils";
 import type { Estante, Libro } from "@/shared/types";
 
@@ -58,6 +59,71 @@ function UbicacionBadge({ libro }: { libro: Libro }) {
   );
 }
 
+/**
+ * Panel lateral de detalle del libro elegido en el mapa (RF-03/RF-07).
+ * Muestra portada e info relevante; "Ver ficha completa" abre el modal.
+ */
+function LibroDetallePanel({ libro, onVerFicha }: { libro: Libro; onVerFicha: () => void }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg shadow-stone-900/8">
+      <div className="flex min-h-0 flex-1 flex-col p-3">
+        {/* Cabecera compacta: portada chica + datos principales */}
+        <div className="flex gap-3">
+          {libro.imagenes.length > 0 ? (
+            <img
+              src={urlImagenLibro(libro.imagenes[0])}
+              alt={libro.titulo}
+              className="h-28 w-20 shrink-0 rounded-md object-cover shadow-sm ring-1 ring-black/5"
+            />
+          ) : (
+            <div className="flex h-28 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-md bg-slate-100 text-slate-300">
+              <ImageOff className="h-6 w-6" />
+            </div>
+          )}
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h3 className="line-clamp-3 font-serif text-sm font-bold leading-snug text-stone-900">{libro.titulo}</h3>
+            <p className="mt-0.5 truncate text-xs text-stone-600">{libro.autor}</p>
+            <p className="truncate text-[11px] text-stone-400">{libro.editorial}</p>
+            <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
+              <UbicacionBadge libro={libro} />
+              {libro.nivel_numero !== null && (
+                <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">
+                  Nivel {libro.nivel_numero}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Datos concisos en filas clave→valor */}
+        <dl className="mt-3 space-y-1 border-t border-stone-100 pt-2 text-[11px]">
+          {libro.coleccion_nombre && (
+            <div className="flex justify-between gap-2">
+              <dt className="shrink-0 text-stone-400">Colección</dt>
+              <dd className="truncate text-right font-medium text-unla">{libro.coleccion_nombre}</dd>
+            </div>
+          )}
+          <div className="flex justify-between gap-2">
+            <dt className="shrink-0 text-stone-400">ISBN</dt>
+            <dd className="truncate text-right tabular-nums text-stone-700">{libro.isbn ?? "—"}</dd>
+          </div>
+          <div className="flex justify-between gap-2">
+            <dt className="shrink-0 text-stone-400">Precio</dt>
+            <dd className="tabular-nums text-stone-700">{formatearPrecio(libro.precio)}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="border-t border-stone-100 p-2.5">
+        <Button variant="outline" className="w-full" onClick={onVerFicha}>
+          <BookOpen className="h-4 w-4" /> Ver ficha completa
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PublicSearchPage() {
   const [solapa, setSolapa] = useState<Solapa>("catalogo");
 
@@ -72,6 +138,7 @@ export function PublicSearchPage() {
 
   // ── Estado del mapa ──────────────────────────────────────────────────────────
   const [estantePanel, setEstantePanel] = useState<Estante | null>(null);
+  const [libroMapa, setLibroMapa] = useState<Libro | null>(null);
   const [zonaId, setZonaId] = useState("");
 
   // Búsqueda desde 2 caracteres (CU-01). Compartida entre catálogo y mapa.
@@ -177,24 +244,37 @@ export function PublicSearchPage() {
           />
         </div>
 
-        {/* Solapas: Catálogo (por defecto) · Mapa */}
-        <div className="mb-5 inline-flex rounded-xl border border-stone-200 bg-white p-1 shadow-sm">
-          {([
-            { s: "catalogo", Icono: BookOpen, titulo: "Catálogo" },
-            { s: "mapa", Icono: MapIcon, titulo: "Mapa" },
-          ] as const).map(({ s, Icono, titulo }) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSolapa(s)}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-                solapa === s ? "bg-unla text-white shadow-sm" : "text-stone-500 hover:text-stone-800",
+        {/* Solapas: Catálogo (por defecto) · Mapa — en Mapa, a la derecha el título y el filtro de plantas */}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1 shadow-sm">
+            {([
+              { s: "catalogo", Icono: BookOpen, titulo: "Catálogo" },
+              { s: "mapa", Icono: MapIcon, titulo: "Mapa" },
+            ] as const).map(({ s, Icono, titulo }) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSolapa(s)}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                  solapa === s ? "bg-unla text-white shadow-sm" : "text-stone-500 hover:text-stone-800",
+                )}
+              >
+                <Icono className="h-4 w-4" /> {titulo}
+              </button>
+            ))}
+          </div>
+
+          {solapa === "mapa" && (
+            <div className="flex items-center gap-3">
+              <h2 className="font-serif text-lg font-semibold text-stone-900">Mapa de la sala</h2>
+              {zonas.length > 1 && (
+                <Select value={zonaId} onChange={(e) => setZonaId(e.target.value)} className="w-44">
+                  {zonas.map((z) => <option key={z.id} value={z.id}>{z.nombre}</option>)}
+                </Select>
               )}
-            >
-              <Icono className="h-4 w-4" /> {titulo}
-            </button>
-          ))}
+            </div>
+          )}
         </div>
 
         {/* ══════════════════════ SOLAPA CATÁLOGO ══════════════════════ */}
@@ -370,16 +450,8 @@ export function PublicSearchPage() {
 
         {/* ══════════════════════ SOLAPA MAPA ══════════════════════ */}
         {solapa === "mapa" && (
-          <div className="mx-auto max-w-4xl">
-            {/* Encabezado del mapa */}
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="font-serif text-lg font-semibold text-stone-900">Mapa de la sala</h2>
-              {zonas.length > 1 && (
-                <Select value={zonaId} onChange={(e) => setZonaId(e.target.value)} className="w-44">
-                  {zonas.map((z) => <option key={z.id} value={z.id}>{z.nombre}</option>)}
-                </Select>
-              )}
-            </div>
+          <div>
+            {/* El título y el filtro de plantas viven en la fila de solapas (arriba). */}
 
             {/* Pista: coincidencias en otra zona */}
             {zonasConMatch.length > 0 && !zonasConMatch.some((z) => z.id === zonaId) && (
@@ -388,8 +460,8 @@ export function PublicSearchPage() {
               </p>
             )}
 
-            {/* Mapa (RF-01 / RF-13 / RF-11) — solo lectura */}
-            <div className="h-[42vh]">
+            {/* Mapa (RF-01 / RF-13 / RF-11) — solo lectura, a todo el ancho y más alto */}
+            <div className="h-[58vh] min-h-[22rem]">
               <MapaCanvas
                 estantes={estantesZona}
                 anotaciones={anotacionesZona}
@@ -398,7 +470,11 @@ export function PublicSearchPage() {
                 resaltados={resaltados}
                 seleccionadoId={estantePanel?.id}
                 onSeleccionar={(e) =>
-                  setEstantePanel((prev) => (prev?.id === e.id ? null : e))
+                  setEstantePanel((prev) => {
+                    const siguiente = prev?.id === e.id ? null : e;
+                    setLibroMapa(null); // al cambiar/cerrar el estante, limpiar el libro elegido
+                    return siguiente;
+                  })
                 }
               />
             </div>
@@ -408,19 +484,36 @@ export function PublicSearchPage() {
                 : "Tocá un estante para ver qué libros tiene."}
             </p>
 
-            {/* Panel inline: siempre reservado debajo del mapa (RF-03). */}
-            <div className="mt-3 h-72">
-              {estantePanel ? (
-                <EstantePanelInline
-                  estante={estantePanel}
-                  zonas={zonas}
-                  onCerrar={() => setEstantePanel(null)}
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-stone-200 bg-stone-50/60 text-sm text-stone-400">
-                  Tocá un estante para ver sus libros
-                </div>
-              )}
+            {/* Debajo del mapa: estante + libros (izquierda) · detalle del libro (derecha) */}
+            <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+              {/* Izquierda: niveles y libros del estante (RF-03) */}
+              <div className="h-80">
+                {estantePanel ? (
+                  <EstantePanelInline
+                    estante={estantePanel}
+                    zonas={zonas}
+                    onCerrar={() => { setEstantePanel(null); setLibroMapa(null); }}
+                    onSeleccionarLibro={setLibroMapa}
+                    libroSeleccionadoId={libroMapa?.id ?? null}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-stone-200 bg-stone-50/60 text-sm text-stone-400">
+                    Tocá un estante para ver sus libros
+                  </div>
+                )}
+              </div>
+
+              {/* Derecha: detalle del libro elegido (o invitación a elegir uno) */}
+              <div className="h-80">
+                {libroMapa ? (
+                  <LibroDetallePanel libro={libroMapa} onVerFicha={() => setLibroDetalle(libroMapa)} />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-stone-200 bg-stone-50/60 px-4 text-center text-sm text-stone-400">
+                    <BookOpen className="h-6 w-6 text-stone-300" />
+                    {estantePanel ? "Seleccioná un libro para ver su información" : "Elegí un estante y luego un libro"}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

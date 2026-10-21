@@ -36,9 +36,19 @@ interface Props {
   permitirReordenar?: boolean;
   /** Texto con el que arranca el buscador interno (viene del buscador del mapa). */
   filtroInicial?: string;
+  /**
+   * Si se provee, el clic en un lomo NO abre el popover flotante sino que delega
+   * el libro elegido al contenedor (vista pública: panel lateral de detalle).
+   * `null` = deseleccionar. El resaltado del lomo activo usa `libroSeleccionadoId`.
+   */
+  onSeleccionarLibro?: (libro: Libro | null) => void;
+  libroSeleccionadoId?: string | null;
 }
 
-export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar = false, filtroInicial }: Props) {
+export function EstantePanelInline({
+  estante, zonas, onCerrar, permitirReordenar = false, filtroInicial,
+  onSeleccionarLibro, libroSeleccionadoId,
+}: Props) {
   const zona = zonas.find((z) => z.id === estante.zona_id);
   const qc = useQueryClient();
   const toast = useToast();
@@ -161,6 +171,8 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   }, [selectedLibro]);
 
   const canDrag = permitirReordenar && !filtro;
+  // Modo "externo": el detalle del libro lo muestra el contenedor en un panel lateral.
+  const modoExterno = !!onSeleccionarLibro;
 
   function onDragStart(idx: number) { dragFromIdx.current = idx; }
 
@@ -210,6 +222,11 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   function handleLomoClick(e: React.MouseEvent<HTMLButtonElement>, libro: Libro) {
     // Ignorar si fue un drag real (HTML5 suprime click, pero por si acaso).
     if (dragFromIdx.current !== null) return;
+    // Modo externo: delegar al contenedor (panel lateral), con toggle.
+    if (modoExterno) {
+      onSeleccionarLibro!(libroSeleccionadoId === libro.id ? null : libro);
+      return;
+    }
     if (selectedLibro?.id === libro.id) {
       setSelectedLibro(null);
       setPopoverPos(null);
@@ -363,15 +380,20 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
             </p>
           )}
 
-          {/* Repisa de lomos */}
+          {/* Repisa de lomos — empujada hacia abajo (mt-auto) para usar el espacio
+              libre; el pt-8 da aire arriba para que el "levantado" de selección no
+              choque con el buscador. */}
           {!isLoading && librosMostrados.length > 0 && (
-            <div>
-              <div className="rounded-t-lg bg-gradient-to-b from-stone-50 to-stone-100 px-3 pt-4">
-                <div ref={scrollRef} className="flex items-end gap-1.5 overflow-x-auto pb-0">
+            <div className="mt-auto">
+              <div className="rounded-t-lg bg-gradient-to-b from-stone-50 to-stone-100 px-3 pt-2">
+                {/* El pt-7 va DENTRO del contenedor con overflow-x-auto: ese scroll
+                    recorta también en vertical, así que necesita aire propio arriba
+                    para que la "cabeza" del lomo no se corte al elevarse. */}
+                <div ref={scrollRef} className="flex items-end gap-1.5 overflow-x-auto pb-0 pt-7">
                   {librosMostrados.map((libro, idx) => {
                     const lomo = colorLomo(libro.id);
                     const altura = altoLomo(libro.id) * 1.25;
-                    const isSelected = selectedLibro?.id === libro.id;
+                    const isSelected = (modoExterno ? libroSeleccionadoId : selectedLibro?.id) === libro.id;
                     const isDropTarget = canDrag && dragOverIdx === idx;
                     return (
                       <button
@@ -437,7 +459,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
       </div>
 
       {/* ── Popover del libro seleccionado (fixed, sobre el lomo) ───────────── */}
-      {selectedLibro && popoverPos && (
+      {!modoExterno && selectedLibro && popoverPos && (
         <div
           ref={popoverRef}
           style={{
