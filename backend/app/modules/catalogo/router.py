@@ -15,7 +15,7 @@ from app.modules.catalogo.schemas import (
     CategoriaLoteRequest, UbicarLoteRequest,
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
-    LibroImagenResponse,
+    LibroImagenResponse, EstanteImagenResponse,
     CampoLibroResponse, CampoLibroCreate, CampoLibroUpdate,
 )
 
@@ -99,6 +99,19 @@ def obtener_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db)):
     return Response(
         content=img.contenido,
         media_type=img.content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+# Foto de referencia de un estante: lectura pública (RF-07). Nombre con guion
+# ("estante-fotos") a propósito, para no colisionar con el parseo de /estantes/{id}.
+# Los ids vienen en cada EstanteResponse (campo `fotos`).
+@router.get("/estante-fotos/{foto_id}")
+def obtener_foto_estante(foto_id: uuid.UUID, db: Session = Depends(get_db)):
+    foto = service.obtener_foto_estante(db, foto_id)
+    return Response(
+        content=foto.contenido,
+        media_type=foto.content_type,
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
@@ -291,6 +304,41 @@ def eliminar_estante(
     else:
         detalle = ""
     audit.registrar_accion(f"Eliminó el estante '{codigo}'{detalle}", modulo=_MODULO, accion="Eliminación")
+
+
+# ─── Fotos de referencia del estante ──────────────────────────────────────────
+
+@router.post(
+    "/estantes/{estante_id}/fotos",
+    response_model=list[EstanteImagenResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def subir_fotos_estante(
+    estante_id: uuid.UUID,
+    archivos: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT_EST,
+):
+    """Sube una o varias fotos de referencia y las agrega a la galería del estante."""
+    estante = service.obtener_estante(db, estante_id)
+    creadas: list[EstanteImagenResponse] = []
+    for archivo in archivos:
+        contenido = await archivo.read()
+        foto = service.agregar_foto_estante(
+            db, estante_id, archivo.content_type or "", contenido,
+        )
+        creadas.append(EstanteImagenResponse.model_validate(foto))
+    audit.registrar_accion(
+        f"Agregó {len(creadas)} foto(s) al estante '{estante.codigo}'",
+        modulo=_MODULO, accion="Edición",
+    )
+    return creadas
+
+
+@router.delete("/estante-fotos/{foto_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_foto_estante(foto_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
+    service.eliminar_foto_estante(db, foto_id)
+    audit.registrar_accion("Eliminó una foto de un estante", modulo=_MODULO, accion="Eliminación")
 
 
 @router.post("/estantes/eliminar-lote")

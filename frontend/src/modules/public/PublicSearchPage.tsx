@@ -6,10 +6,13 @@ import {
   BookOpen, Map as MapIcon,
 } from "lucide-react";
 import { Select } from "@/shared/components/ui/Select";
+import { Modal } from "@/shared/components/ui/Modal";
 import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 import {
-  listarLibros, listarEstantes, listarZonas, listarAnotaciones, listarColecciones, urlImagenLibro,
+  listarLibros, listarEstantes, listarZonas, listarAnotaciones, listarColecciones,
+  urlImagenLibro, urlFotoEstante,
 } from "@/modules/catalogo/api";
+import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
 import { LibroDetalleModal } from "@/modules/catalogo/LibroDetalleModal";
 import { MapaCanvas } from "@/modules/mapa/MapaCanvas";
 import { EstantePanelInline } from "@/modules/mapa/EstantePanelInline";
@@ -139,6 +142,7 @@ export function PublicSearchPage() {
   // ── Estado del mapa ──────────────────────────────────────────────────────────
   const [estantePanel, setEstantePanel] = useState<Estante | null>(null);
   const [libroMapa, setLibroMapa] = useState<Libro | null>(null);
+  const [verReferencia, setVerReferencia] = useState<Estante | null>(null);
   const [zonaId, setZonaId] = useState("");
 
   // Búsqueda desde 2 caracteres (CU-01). Compartida entre catálogo y mapa.
@@ -447,11 +451,12 @@ export function PublicSearchPage() {
             )}
           </div>
         )}
+      </div>
 
-        {/* ══════════════════════ SOLAPA MAPA ══════════════════════ */}
-        {solapa === "mapa" && (
-          <div>
-            {/* El título y el filtro de plantas viven en la fila de solapas (arriba). */}
+      {/* ══════════════════════ SOLAPA MAPA (ancho completo) ══════════════════════ */}
+      {solapa === "mapa" && (
+        <div className="w-full px-4 pb-8 sm:px-6 lg:px-8">
+          {/* El título y el filtro de plantas viven en la fila de solapas (arriba). */}
 
             {/* Pista: coincidencias en otra zona */}
             {zonasConMatch.length > 0 && !zonasConMatch.some((z) => z.id === zonaId) && (
@@ -495,6 +500,7 @@ export function PublicSearchPage() {
                     onCerrar={() => { setEstantePanel(null); setLibroMapa(null); }}
                     onSeleccionarLibro={setLibroMapa}
                     libroSeleccionadoId={libroMapa?.id ?? null}
+                    onVerReferencia={() => setVerReferencia(estantePanel)}
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-stone-200 bg-stone-50/60 text-sm text-stone-400">
@@ -517,10 +523,27 @@ export function PublicSearchPage() {
             </div>
           </div>
         )}
-      </div>
 
       {/* Detalle del libro — solo lectura (sin botón editar). */}
       <LibroDetalleModal libro={libroDetalle} onClose={() => setLibroDetalle(null)} />
+
+      {/* Fotos de referencia del estante (RF-07) — carrusel en modal. */}
+      {verReferencia && verReferencia.fotos.length > 0 && (
+        <Modal
+          abierto
+          onClose={() => setVerReferencia(null)}
+          titulo={`Referencia — ${verReferencia.codigo}`}
+          ancho="max-w-lg"
+        >
+          <ImagenCarrusel
+            imagenes={verReferencia.fotos}
+            resolverUrl={urlFotoEstante}
+            ajuste="natural"
+            maxAltoClase="max-h-[70vh]"
+            alt={`Estante ${verReferencia.codigo}`}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

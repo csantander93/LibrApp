@@ -1,12 +1,15 @@
+import io
 import re
 import uuid
 import unicodedata
 from datetime import date
+from PIL import Image, ImageOps
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.catalogo.models import (
-    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen, CampoLibro,
+    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen,
+    EstanteImagen, CampoLibro,
 )
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, NivelResponse, LibroCreate, LibroUpdate,
@@ -56,6 +59,7 @@ def _to_estante_response(
         coleccion_id=e.coleccion_id,
         coleccion_nombre=e.coleccion.nombre if e.coleccion else None,
         total_libros=total_libros, niveles=niveles,
+        fotos=[f.id for f in sorted(e.fotos, key=lambda f: f.orden)],
     )
 
 
@@ -99,7 +103,11 @@ def listar_estantes(db: Session) -> list[EstanteResponse]:
     )
     estantes = (
         db.query(Estante)
-        .options(selectinload(Estante.niveles), selectinload(Estante.coleccion))
+        .options(
+            selectinload(Estante.niveles),
+            selectinload(Estante.coleccion),
+            selectinload(Estante.fotos),  # solo ids/orden; el binario es diferido
+        )
         .order_by(Estante.codigo)
         .all()
     )
@@ -407,11 +415,36 @@ def ubicar_libros_lote(db: Session, ids: list[uuid.UUID], estante_id, nivel_id) 
 
 # ─── Imágenes del libro (portada / vistas) ────────────────────────────────────
 
-# Tope de imágenes por libro y tamaño máximo por archivo (5 MB). Tipos aceptados:
-# formatos web usuales. Sin procesamiento (no se recomprime ni redimensiona).
+# Tope de imágenes por libro y tamaño máximo por archivo (5 MB) del archivo subido.
+# Tipos aceptados a la entrada: formatos web usuales. TODAS se convierten a WEBP
+# al guardar (ver `_a_webp`) para optimizar el espacio en disco.
 MAX_IMAGENES_LIBRO = 5
 MAX_IMAGEN_BYTES = 5 * 1024 * 1024
 CONTENT_TYPES_IMAGEN = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
+WEBP_CONTENT_TYPE = "image/webp"
+
+
+def _a_webp(contenido: bytes) -> bytes:
+    """Convierte una imagen soportada a WEBP (optimiza el espacio en disco).
+
+    Respeta la orientación EXIF (fotos de celular giradas) y conserva la
+    transparencia cuando la hay. Lanza ValidationError si el archivo no es una
+    imagen procesable."""
+    try:
+        with Image.open(io.BytesIO(contenido)) as img:
+            # Aplica la rotación declarada en los metadatos EXIF (celulares).
+            img = ImageOps.exif_transpose(img)
+            if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+                img = img.convert("RGBA")
+            else:
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="WEBP", quality=82, method=6)
+            return buf.getvalue()
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError("No se pudo procesar la imagen (archivo dañado o formato no soportado)")
 
 
 def obtener_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
@@ -438,12 +471,13 @@ def agregar_imagen(
     )
     if total >= MAX_IMAGENES_LIBRO:
         raise ConflictError(f"Un libro admite hasta {MAX_IMAGENES_LIBRO} imágenes")
+    contenido = _a_webp(contenido)  # se guarda siempre en WEBP
     max_orden = (
         db.query(func.max(LibroImagen.orden)).filter(LibroImagen.libro_id == libro_id).scalar()
     )
     siguiente = 0 if max_orden is None else max_orden + 1
     img = LibroImagen(
-        libro_id=libro_id, orden=siguiente, content_type=content_type, contenido=contenido,
+        libro_id=libro_id, orden=siguiente, content_type=WEBP_CONTENT_TYPE, contenido=contenido,
     )
     db.add(img)
     db.commit()
@@ -490,6 +524,74 @@ def hacer_principal_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
     db.commit()
     db.refresh(img)
     return img
+
+
+# ─── Fotos de referencia del estante ──────────────────────────────────────────
+
+# Mismo tope de tamaño y tipos que las imágenes de libro; hasta 8 fotos por estante.
+MAX_FOTOS_ESTANTE = 8
+
+
+def obtener_foto_estante(db: Session, foto_id: uuid.UUID) -> EstanteImagen:
+    foto = db.get(EstanteImagen, foto_id)
+    if not foto:
+        raise NotFoundError("Foto no encontrada")
+    return foto
+
+
+def agregar_foto_estante(
+    db: Session, estante_id: uuid.UUID, content_type: str, contenido: bytes,
+) -> EstanteImagen:
+    """Agrega una foto al final de la galería del estante. Valida tipo, tamaño y
+    el tope por estante."""
+    obtener_estante(db, estante_id)
+    if content_type not in CONTENT_TYPES_IMAGEN:
+        raise ValidationError("Formato de imagen no admitido (usá JPG, PNG, WEBP, GIF o AVIF)")
+    if not contenido:
+        raise ValidationError("El archivo está vacío")
+    if len(contenido) > MAX_IMAGEN_BYTES:
+        raise ValidationError("La imagen supera el tamaño máximo (5 MB)")
+    total = (
+        db.query(func.count(EstanteImagen.id)).filter(EstanteImagen.estante_id == estante_id).scalar() or 0
+    )
+    if total >= MAX_FOTOS_ESTANTE:
+        raise ConflictError(f"Un estante admite hasta {MAX_FOTOS_ESTANTE} fotos")
+    contenido = _a_webp(contenido)  # se guarda siempre en WEBP
+    max_orden = (
+        db.query(func.max(EstanteImagen.orden)).filter(EstanteImagen.estante_id == estante_id).scalar()
+    )
+    siguiente = 0 if max_orden is None else max_orden + 1
+    foto = EstanteImagen(
+        estante_id=estante_id, orden=siguiente, content_type=WEBP_CONTENT_TYPE, contenido=contenido,
+    )
+    db.add(foto)
+    db.commit()
+    db.refresh(foto)
+    return foto
+
+
+def _renumerar_fotos_estante(db: Session, estante_id: uuid.UUID) -> None:
+    """Deja el `orden` de las fotos contiguo (0..N) según el orden actual."""
+    fotos = (
+        db.query(EstanteImagen)
+        .filter(EstanteImagen.estante_id == estante_id)
+        .order_by(EstanteImagen.orden)
+        .all()
+    )
+    for idx, foto in enumerate(fotos):
+        if foto.orden != idx:
+            foto.orden = idx
+
+
+def eliminar_foto_estante(db: Session, foto_id: uuid.UUID) -> uuid.UUID:
+    """Elimina una foto y renumera el resto. Devuelve el id del estante afectado."""
+    foto = obtener_foto_estante(db, foto_id)
+    estante_id = foto.estante_id
+    db.delete(foto)
+    db.flush()
+    _renumerar_fotos_estante(db, estante_id)
+    db.commit()
+    return estante_id
 
 
 # ─── Escritura: Estante ───────────────────────────────────────────────────────

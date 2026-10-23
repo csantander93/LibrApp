@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
+import { ImagePlus, Loader2, Plus, X } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
@@ -10,8 +10,12 @@ import { ColorPicker } from "@/shared/components/ui/ColorPicker";
 import type { Estante, Zona } from "@/shared/types";
 import {
   crearEstante, actualizarEstante, listarColecciones, crearColeccion,
+  urlFotoEstante, subirFotosEstante, eliminarFotoEstante,
   type EstanteInput,
 } from "./api";
+
+/** Tope de fotos de referencia por estante (coincide con el backend). */
+const MAX_FOTOS_ESTANTE = 8;
 
 /** Próximo código secuencial libre con formato E{n} (E1, E2, E3…). */
 export function siguienteCodigoEstante(estantes: Estante[]): string {
@@ -57,6 +61,27 @@ export function EstanteFormModal({
   const [creandoCat, setCreandoCat] = useState(false);
   const [nuevaCat, setNuevaCat] = useState("");
 
+  // Fotos de referencia (solo en edición). Cambios diferidos: se aplican al Guardar.
+  const [fotosABorrar, setFotosABorrar] = useState<string[]>([]);
+  const [fotosNuevas, setFotosNuevas] = useState<File[]>([]);
+  const fotosActuales = (estante?.fotos ?? []).filter((id) => !fotosABorrar.includes(id));
+  const totalFotos = fotosActuales.length + fotosNuevas.length;
+  // URLs de preview de los archivos nuevos (se liberan al cambiar la lista).
+  const previews = useMemo(() => fotosNuevas.map((f) => URL.createObjectURL(f)), [fotosNuevas]);
+  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
+
+  function agregarArchivos(lista: FileList | null) {
+    if (!lista || lista.length === 0) return;
+    const nuevos = Array.from(lista);
+    const cupo = MAX_FOTOS_ESTANTE - totalFotos;
+    if (cupo <= 0) {
+      toast.error(`Un estante admite hasta ${MAX_FOTOS_ESTANTE} fotos`);
+      return;
+    }
+    if (nuevos.length > cupo) toast.error(`Solo se agregarán ${cupo} foto(s) (tope ${MAX_FOTOS_ESTANTE})`);
+    setFotosNuevas((prev) => [...prev, ...nuevos.slice(0, cupo)]);
+  }
+
   const { data: colecciones = [] } = useQuery({
     queryKey: ["colecciones"],
     queryFn: listarColecciones,
@@ -77,7 +102,7 @@ export function EstanteFormModal({
   });
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const base: EstanteInput = {
         codigo: codigo.trim().toUpperCase(),
         etiqueta: etiqueta.trim() || null,
@@ -88,7 +113,11 @@ export function EstanteFormModal({
       if (esAlta) {
         return crearEstante({ ...base, cantidad_niveles: niveles });
       }
-      return actualizarEstante(estante!.id, base);
+      const guardado = await actualizarEstante(estante!.id, base);
+      // Aplicar los cambios de fotos recién al guardar (edición diferida).
+      for (const id of fotosABorrar) await eliminarFotoEstante(id);
+      if (fotosNuevas.length) await subirFotosEstante(estante!.id, fotosNuevas);
+      return guardado;
     },
     onSuccess: (guardado) => {
       qc.invalidateQueries({ queryKey: ["estantes"] });
@@ -210,6 +239,60 @@ export function EstanteFormModal({
           <label className="mb-1 block text-sm font-medium text-slate-700">Color en el mapa</label>
           <ColorPicker value={color} onChange={setColor} />
         </div>
+
+        {!esAlta && (
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-sm font-medium text-slate-700">Fotos de referencia</label>
+              <span className="text-[11px] text-slate-400">{totalFotos}/{MAX_FOTOS_ESTANTE}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {fotosActuales.map((id) => (
+                <div key={id} className="group relative h-28 overflow-hidden rounded-lg border border-stone-200 bg-stone-100">
+                  <img src={urlFotoEstante(id)} alt="Foto del estante" className="h-full w-full object-contain" />
+                  <button
+                    type="button"
+                    onClick={() => setFotosABorrar((prev) => [...prev, id])}
+                    aria-label="Quitar foto"
+                    className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              {fotosNuevas.map((f, i) => (
+                <div key={`nueva-${i}`} className="group relative h-28 overflow-hidden rounded-lg border border-unla/40 bg-stone-100 ring-1 ring-unla/30">
+                  <img src={previews[i]} alt={f.name} className="h-full w-full object-contain" />
+                  <span className="absolute inset-x-0 bottom-0 bg-unla/80 py-0.5 text-center text-[9px] font-medium text-white">Nueva</span>
+                  <button
+                    type="button"
+                    onClick={() => setFotosNuevas((prev) => prev.filter((_, j) => j !== i))}
+                    aria-label="Quitar foto nueva"
+                    className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              {totalFotos < MAX_FOTOS_ESTANTE && (
+                <label className="flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-stone-300 bg-stone-50 text-stone-400 transition-colors hover:border-unla/50 hover:text-unla">
+                  <ImagePlus className="h-5 w-5" />
+                  <span className="text-[10px] font-medium">Agregar</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => { agregarArchivos(e.target.files); e.target.value = ""; }}
+                  />
+                </label>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Vistas reales del estante (horizontales o verticales). Los cambios se aplican al guardar.
+            </p>
+          </div>
+        )}
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 

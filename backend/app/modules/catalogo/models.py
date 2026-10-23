@@ -81,6 +81,14 @@ class Estante(UUIDMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="Nivel.numero",
     )
+    # Fotos de referencia del estante (vistas reales, formato vertical) — opcionales.
+    # Ayudan a ubicarlo de un vistazo: forma, color real y qué hay cerca. Se borran
+    # en cascada al eliminar el estante.
+    fotos: Mapped[list["EstanteImagen"]] = relationship(
+        back_populates="estante",
+        cascade="all, delete-orphan",
+        order_by="EstanteImagen.orden",
+    )
 
 
 class Nivel(UUIDMixin, TimestampMixin, Base):
@@ -102,6 +110,26 @@ class Nivel(UUIDMixin, TimestampMixin, Base):
 
     estante: Mapped["Estante"] = relationship(back_populates="niveles")
     libros: Mapped[list["Libro"]] = relationship(back_populates="nivel")
+
+
+class EstanteImagen(UUIDMixin, TimestampMixin, Base):
+    """Foto de referencia de un estante (vista real) — opcional.
+
+    Mismo esquema que `LibroImagen`: el binario vive en la propia DB (columna
+    diferida: no se trae en los listados, solo al servir la foto por su endpoint).
+    `orden` define la posición en la galería. No hay "principal" (son referencias).
+    """
+    __tablename__ = "imagenes_estante"
+
+    estante_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("estantes.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Diferida: los listados de estantes no cargan el binario (solo id/orden/tipo).
+    contenido: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+
+    estante: Mapped["Estante"] = relationship(back_populates="fotos")
 
 
 # Tipos de anotación/elemento decorativo que se pueden soltar sobre el plano.

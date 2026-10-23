@@ -103,11 +103,23 @@ class EstanteResponse(BaseModel):
     coleccion_nombre: str | None = None
     total_libros: int = 0
     niveles: list[NivelResponse] = []
+    # Ids de las fotos de referencia ordenadas. El binario se pide aparte a
+    # GET /catalogo/estante-fotos/{id}.
+    fotos: list[uuid.UUID] = []
 
 
 class LibroImagenResponse(BaseModel):
     """Metadatos de una imagen de libro (sin el binario). El binario se pide
     aparte a GET /catalogo/imagenes/{id}."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    orden: int
+    content_type: str
+
+
+class EstanteImagenResponse(BaseModel):
+    """Metadatos de una foto de estante (sin el binario). El binario se pide
+    aparte a GET /catalogo/estante-fotos/{id}."""
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     orden: int

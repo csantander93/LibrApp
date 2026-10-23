@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import type {
   Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
-  Anotacion, AnotacionTipo, LibroImagen, CampoLibro, CampoLibroInput, TexturaPiso,
+  Anotacion, AnotacionTipo, LibroImagen, EstanteImagen, CampoLibro, CampoLibroInput, TexturaPiso,
 } from "@/shared/types";
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -177,6 +177,24 @@ export async function hacerPrincipalImagen(imagenId: string): Promise<LibroImage
 
 export async function eliminarImagenLibro(imagenId: string): Promise<void> {
   await api.delete(`/catalogo/imagenes/${imagenId}`);
+}
+
+// ─── Fotos de referencia de estantes ──────────────────────────────────────────
+
+/** URL pública para mostrar una foto de estante en un <img src>. */
+export function urlFotoEstante(fotoId: string): string {
+  return `${api.defaults.baseURL}/catalogo/estante-fotos/${fotoId}`;
+}
+
+export async function subirFotosEstante(estanteId: string, archivos: File[]): Promise<EstanteImagen[]> {
+  const form = new FormData();
+  archivos.forEach((f) => form.append("archivos", f));
+  const { data } = await api.post<EstanteImagen[]>(`/catalogo/estantes/${estanteId}/fotos`, form);
+  return data;
+}
+
+export async function eliminarFotoEstante(fotoId: string): Promise<void> {
+  await api.delete(`/catalogo/estante-fotos/${fotoId}`);
 }
 
 // ─── Estantes (escritura) ─────────────────────────────────────────────────────

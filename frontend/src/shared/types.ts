@@ -113,6 +113,12 @@ export interface LibroImagen {
   content_type: string;
 }
 
+export interface EstanteImagen {
+  id: string;
+  orden: number;
+  content_type: string;
+}
+
 export interface Coleccion {
   id: string;
   nombre: string;
@@ -160,6 +166,8 @@ export interface Estante {
   coleccion_nombre: string | null;
   total_libros: number;
   niveles: Nivel[];
+  /** Ids de las fotos de referencia (vistas reales del estante). */
+  fotos: string[];
 }
 
 export type AnotacionTipo =

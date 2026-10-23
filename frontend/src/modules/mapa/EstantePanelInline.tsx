@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers, Undo2, BookPlus } from "lucide-react";
+import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers, Undo2, BookPlus, Image as ImageIcon } from "lucide-react";
 import { cn, colorLomo, altoLomo } from "@/lib/utils";
 import { listarLibros, listarCampos, guardarOrdenLibros } from "@/modules/catalogo/api";
 import { useToast } from "@/shared/components/ui/Toast";
@@ -43,11 +43,13 @@ interface Props {
    */
   onSeleccionarLibro?: (libro: Libro | null) => void;
   libroSeleccionadoId?: string | null;
+  /** Si se provee y el estante tiene fotos, muestra el botón "Ver referencia". */
+  onVerReferencia?: () => void;
 }
 
 export function EstantePanelInline({
   estante, zonas, onCerrar, permitirReordenar = false, filtroInicial,
-  onSeleccionarLibro, libroSeleccionadoId,
+  onSeleccionarLibro, libroSeleccionadoId, onVerReferencia,
 }: Props) {
   const zona = zonas.find((z) => z.id === estante.zona_id);
   const qc = useQueryClient();
@@ -257,6 +259,16 @@ export function EstantePanelInline({
           {zona && <span className="text-xs text-stone-500">· {zona.nombre}</span>}
         </div>
         <div className="flex items-center gap-1">
+          {onVerReferencia && estante.fotos.length > 0 && (
+            <button
+              onClick={onVerReferencia}
+              title="Ver fotos de referencia del estante"
+              className="flex items-center gap-1 rounded-full border border-unla/30 bg-unla/5 px-2 py-1 text-[11px] font-medium text-unla transition-colors hover:bg-unla/10"
+            >
+              <ImageIcon className="h-3.5 w-3.5" />
+              Ver referencia
+            </button>
+          )}
           {permitirReordenar && (
             <button
               onClick={() => setUbicarAbierto(true)}
