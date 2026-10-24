@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers, Undo2 } from "lucide-react";
+import { Loader2, X, MapPin, Search, GripHorizontal, ChevronUp, ChevronDown, Layers, Undo2, BookPlus, Image as ImageIcon } from "lucide-react";
 import { cn, colorLomo, altoLomo } from "@/lib/utils";
 import { listarLibros, listarCampos, guardarOrdenLibros } from "@/modules/catalogo/api";
 import { useToast } from "@/shared/components/ui/Toast";
 import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
+import { UbicarLibrosModal } from "./UbicarLibrosModal";
 import type { Estante, Libro, Zona, CampoLibro } from "@/shared/types";
 
 /** Formatea el valor de un campo personalizado según su tipo, para mostrarlo. */
@@ -35,9 +36,21 @@ interface Props {
   permitirReordenar?: boolean;
   /** Texto con el que arranca el buscador interno (viene del buscador del mapa). */
   filtroInicial?: string;
+  /**
+   * Si se provee, el clic en un lomo NO abre el popover flotante sino que delega
+   * el libro elegido al contenedor (vista pública: panel lateral de detalle).
+   * `null` = deseleccionar. El resaltado del lomo activo usa `libroSeleccionadoId`.
+   */
+  onSeleccionarLibro?: (libro: Libro | null) => void;
+  libroSeleccionadoId?: string | null;
+  /** Si se provee y el estante tiene fotos, muestra el botón "Ver referencia". */
+  onVerReferencia?: () => void;
 }
 
-export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar = false, filtroInicial }: Props) {
+export function EstantePanelInline({
+  estante, zonas, onCerrar, permitirReordenar = false, filtroInicial,
+  onSeleccionarLibro, libroSeleccionadoId, onVerReferencia,
+}: Props) {
   const zona = zonas.find((z) => z.id === estante.zona_id);
   const qc = useQueryClient();
   const toast = useToast();
@@ -98,6 +111,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   const bajarNivel = () => { if (nivelIdx > 0) setNivelSelId(niveles[nivelIdx - 1].id); };
 
   const [busqueda, setBusqueda] = useState(filtroInicial ?? "");
+  const [ubicarAbierto, setUbicarAbierto] = useState(false);
   const [selectedLibro, setSelectedLibro] = useState<Libro | null>(null);
   const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -159,6 +173,8 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   }, [selectedLibro]);
 
   const canDrag = permitirReordenar && !filtro;
+  // Modo "externo": el detalle del libro lo muestra el contenedor en un panel lateral.
+  const modoExterno = !!onSeleccionarLibro;
 
   function onDragStart(idx: number) { dragFromIdx.current = idx; }
 
@@ -208,6 +224,11 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
   function handleLomoClick(e: React.MouseEvent<HTMLButtonElement>, libro: Libro) {
     // Ignorar si fue un drag real (HTML5 suprime click, pero por si acaso).
     if (dragFromIdx.current !== null) return;
+    // Modo externo: delegar al contenedor (panel lateral), con toggle.
+    if (modoExterno) {
+      onSeleccionarLibro!(libroSeleccionadoId === libro.id ? null : libro);
+      return;
+    }
     if (selectedLibro?.id === libro.id) {
       setSelectedLibro(null);
       setPopoverPos(null);
@@ -227,18 +248,45 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
             <MapPin className="h-3 w-3" />
             {estante.codigo}
           </span>
+          {estante.coleccion_nombre && (
+            <span className="rounded-full bg-unla/10 px-2 py-0.5 text-[11px] font-medium text-unla">
+              {estante.coleccion_nombre}
+            </span>
+          )}
           {estante.etiqueta && (
             <span className="font-serif text-xs font-semibold text-stone-800">{estante.etiqueta}</span>
           )}
           {zona && <span className="text-xs text-stone-500">· {zona.nombre}</span>}
         </div>
-        <button
-          onClick={onCerrar}
-          title="Cerrar panel"
-          className="flex h-6 w-6 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onVerReferencia && estante.fotos.length > 0 && (
+            <button
+              onClick={onVerReferencia}
+              title="Ver fotos de referencia del estante"
+              className="flex items-center gap-1 rounded-full border border-unla/30 bg-unla/5 px-2 py-1 text-[11px] font-medium text-unla transition-colors hover:bg-unla/10"
+            >
+              <ImageIcon className="h-3.5 w-3.5" />
+              Ver referencia
+            </button>
+          )}
+          {permitirReordenar && (
+            <button
+              onClick={() => setUbicarAbierto(true)}
+              title="Agregar libros a este estante"
+              className="flex items-center gap-1 rounded-full border border-unla/30 bg-unla/5 px-2 py-1 text-[11px] font-medium text-unla transition-colors hover:bg-unla/10"
+            >
+              <BookPlus className="h-3.5 w-3.5" />
+              Agregar libros
+            </button>
+          )}
+          <button
+            onClick={onCerrar}
+            title="Cerrar panel"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* ── Cuerpo ───────────────────────────────────────────────────────────── */}
@@ -344,15 +392,20 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
             </p>
           )}
 
-          {/* Repisa de lomos */}
+          {/* Repisa de lomos — empujada hacia abajo (mt-auto) para usar el espacio
+              libre; el pt-8 da aire arriba para que el "levantado" de selección no
+              choque con el buscador. */}
           {!isLoading && librosMostrados.length > 0 && (
-            <div>
-              <div className="rounded-t-lg bg-gradient-to-b from-stone-50 to-stone-100 px-3 pt-4">
-                <div ref={scrollRef} className="flex items-end gap-1.5 overflow-x-auto pb-0">
+            <div className="mt-auto">
+              <div className="rounded-t-lg bg-gradient-to-b from-stone-50 to-stone-100 px-3 pt-2">
+                {/* El pt-7 va DENTRO del contenedor con overflow-x-auto: ese scroll
+                    recorta también en vertical, así que necesita aire propio arriba
+                    para que la "cabeza" del lomo no se corte al elevarse. */}
+                <div ref={scrollRef} className="flex items-end gap-1.5 overflow-x-auto pb-0 pt-7">
                   {librosMostrados.map((libro, idx) => {
                     const lomo = colorLomo(libro.id);
                     const altura = altoLomo(libro.id) * 1.25;
-                    const isSelected = selectedLibro?.id === libro.id;
+                    const isSelected = (modoExterno ? libroSeleccionadoId : selectedLibro?.id) === libro.id;
                     const isDropTarget = canDrag && dragOverIdx === idx;
                     return (
                       <button
@@ -418,7 +471,7 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
       </div>
 
       {/* ── Popover del libro seleccionado (fixed, sobre el lomo) ───────────── */}
-      {selectedLibro && popoverPos && (
+      {!modoExterno && selectedLibro && popoverPos && (
         <div
           ref={popoverRef}
           style={{
@@ -482,6 +535,15 @@ export function EstantePanelInline({ estante, zonas, onCerrar, permitirReordenar
             );
           })()}
         </div>
+      )}
+
+      {/* Selector de libros sin ubicar para colocarlos en el nivel actual (solo admin). */}
+      {ubicarAbierto && (
+        <UbicarLibrosModal
+          estante={estante}
+          nivel={nivelSel}
+          onClose={() => setUbicarAbierto(false)}
+        />
       )}
     </div>
   );

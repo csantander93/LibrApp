@@ -3,17 +3,19 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query, Response, statu
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import audit_ctx, AuditContext
+from app.core.deps import audit_ctx, AuditContext, require_permiso
 from app.modules.auth import permisos as P
+from app.modules.auth.models import Usuario
 from app.modules.catalogo import service, importer
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, ColeccionResponse, ZonaResponse,
     LibroCreate, LibroUpdate, PrecioUpdate,
-    EstanteCreate, EstanteUpdate, ColeccionCreate, ImportResultado,
-    PosicionesUpdate, ZonaCreate, ZonaUpdate, LibrosOrdenUpdate,
+    EstanteCreate, EstanteUpdate, ColeccionCreate, ColeccionUpdate, ImportResultado,
+    PosicionesUpdate, ZonaCreate, ZonaUpdate, LibrosOrdenUpdate, IdsRequest,
+    CategoriaLoteRequest, UbicarLoteRequest,
     NivelResponse, NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
-    LibroImagenResponse,
+    LibroImagenResponse, EstanteImagenResponse,
     CampoLibroResponse, CampoLibroCreate, CampoLibroUpdate,
 )
 
@@ -27,6 +29,7 @@ AUDIT = Depends(audit_ctx(P.CATALOGO))        # libros, colecciones, campos, im�
 AUDIT_EST = Depends(audit_ctx(P.ESTANTES))    # estantes, niveles, zonas
 AUDIT_MAPA = Depends(audit_ctx(P.MAPA))       # posiciones, anotaciones, orden de libros
 AUDIT_IMP = Depends(audit_ctx(P.IMPORTAR))    # importación Excel/CSV
+AUDIT_DEL = Depends(audit_ctx(P.ELIMINAR))    # borrado en lote y purga (acciones peligrosas)
 
 # Módulo con el que se etiquetan todas las acciones de este router en el log.
 _MODULO = "Catálogo"
@@ -48,11 +51,16 @@ def listar_libros(
     estante_id: uuid.UUID | None = None,
     nivel_id: uuid.UUID | None = None,
     sin_ubicar: bool | None = None,
+    precio_min: float | None = None,
+    precio_max: float | None = None,
+    autor: str | None = None,
+    editorial: str | None = None,
     db: Session = Depends(get_db),
 ):
     return service.listar_libros(
         db, q=q, coleccion_id=coleccion_id, estante_id=estante_id,
         nivel_id=nivel_id, sin_ubicar=sin_ubicar,
+        precio_min=precio_min, precio_max=precio_max, autor=autor, editorial=editorial,
     )
 
 
@@ -95,6 +103,19 @@ def obtener_imagen(imagen_id: uuid.UUID, db: Session = Depends(get_db)):
     )
 
 
+# Foto de referencia de un estante: lectura pública (RF-07). Nombre con guion
+# ("estante-fotos") a propósito, para no colisionar con el parseo de /estantes/{id}.
+# Los ids vienen en cada EstanteResponse (campo `fotos`).
+@router.get("/estante-fotos/{foto_id}")
+def obtener_foto_estante(foto_id: uuid.UUID, db: Session = Depends(get_db)):
+    foto = service.obtener_foto_estante(db, foto_id)
+    return Response(
+        content=foto.contenido,
+        media_type=foto.content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 # ─── Escritura: Libros (RF-04 / RF-09) ────────────────────────────────────────
 
 # Declarado ANTES de /libros/{libro_id} para que "orden" no se parsee como UUID
@@ -106,6 +127,22 @@ def guardar_orden_libros(data: LibrosOrdenUpdate, db: Session = Depends(get_db),
         f"Reordenó libros en el mapa ({actualizados})", modulo="Mapa", accion="Edición",
     )
     return {"actualizados": actualizados}
+
+
+# Declarado ANTES de /libros/{libro_id} para que "plantilla" no se parsee como UUID.
+# Descarga la "bandeja" vacía a completar para importar (RF-05 / CU-04).
+@router.get("/libros/plantilla")
+def descargar_plantilla(
+    formato: str = Query("csv", pattern="^(csv|xlsx)$"),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_permiso(P.IMPORTAR)),
+):
+    contenido, filename, content_type = importer.generar_plantilla(db, formato)
+    return Response(
+        content=contenido,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/libros", response_model=LibroResponse, status_code=status.HTTP_201_CREATED)
@@ -136,6 +173,48 @@ def eliminar_libro(libro_id: uuid.UUID, db: Session = Depends(get_db), audit: Au
     titulo = libro.titulo
     service.eliminar_libro(db, libro_id)
     audit.registrar_accion(f"Eliminó el libro '{titulo}'", modulo=_MODULO, accion="Eliminación")
+
+
+# ─── Borrado en lote y purga (acciones peligrosas — permiso eliminar.ejecutar) ─
+
+@router.post("/libros/eliminar-lote")
+def eliminar_libros_lote(data: IdsRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT_DEL):
+    n = service.eliminar_libros_lote(db, data.ids)
+    audit.registrar_accion(f"Eliminó {n} libro(s) en lote", modulo=_MODULO, accion="Eliminación")
+    return {"eliminados": n}
+
+
+@router.post("/libros/purgar")
+def purgar_catalogo(db: Session = Depends(get_db), audit: AuditContext = AUDIT_DEL):
+    n = service.purgar_catalogo(db)
+    audit.registrar_accion(f"Purgó el catálogo ({n} libros eliminados)", modulo=_MODULO, accion="Eliminación")
+    return {"eliminados": n}
+
+
+# ─── Acciones en lote sobre la selección: categorizar y ubicar ────────────────
+
+@router.post("/libros/categoria-lote")
+def asignar_categoria_lote(data: CategoriaLoteRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    n = service.asignar_categoria_lote(db, data.ids, data.coleccion_id)
+    if data.coleccion_id is None:
+        detalle = f"Quitó la categoría a {n} libro(s)"
+    else:
+        col = service.obtener_coleccion(db, data.coleccion_id)
+        detalle = f"Asignó la categoría '{col.nombre}' a {n} libro(s)"
+    audit.registrar_accion(detalle, modulo=_MODULO, accion="Edición")
+    return {"actualizados": n}
+
+
+@router.post("/libros/ubicar-lote")
+def ubicar_libros_lote(data: UbicarLoteRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT_MAPA):
+    n = service.ubicar_libros_lote(db, data.ids, data.estante_id, data.nivel_id)
+    if data.estante_id is None:
+        detalle = f"Dejó sin ubicar {n} libro(s)"
+    else:
+        est = service.obtener_estante(db, data.estante_id)
+        detalle = f"Ubicó {n} libro(s) en el estante '{est.codigo}'"
+    audit.registrar_accion(detalle, modulo="Mapa", accion="Edición")
+    return {"actualizados": n}
 
 
 # ─── Imágenes del libro (RF-04) ───────────────────────────────────────────────
@@ -225,6 +304,51 @@ def eliminar_estante(
     else:
         detalle = ""
     audit.registrar_accion(f"Eliminó el estante '{codigo}'{detalle}", modulo=_MODULO, accion="Eliminación")
+
+
+# ─── Fotos de referencia del estante ──────────────────────────────────────────
+
+@router.post(
+    "/estantes/{estante_id}/fotos",
+    response_model=list[EstanteImagenResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def subir_fotos_estante(
+    estante_id: uuid.UUID,
+    archivos: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT_EST,
+):
+    """Sube una o varias fotos de referencia y las agrega a la galería del estante."""
+    estante = service.obtener_estante(db, estante_id)
+    creadas: list[EstanteImagenResponse] = []
+    for archivo in archivos:
+        contenido = await archivo.read()
+        foto = service.agregar_foto_estante(
+            db, estante_id, archivo.content_type or "", contenido,
+        )
+        creadas.append(EstanteImagenResponse.model_validate(foto))
+    audit.registrar_accion(
+        f"Agregó {len(creadas)} foto(s) al estante '{estante.codigo}'",
+        modulo=_MODULO, accion="Edición",
+    )
+    return creadas
+
+
+@router.delete("/estante-fotos/{foto_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_foto_estante(foto_id: uuid.UUID, db: Session = Depends(get_db), audit: AuditContext = AUDIT_EST):
+    service.eliminar_foto_estante(db, foto_id)
+    audit.registrar_accion("Eliminó una foto de un estante", modulo=_MODULO, accion="Eliminación")
+
+
+@router.post("/estantes/eliminar-lote")
+def eliminar_estantes_lote(data: IdsRequest, db: Session = Depends(get_db), audit: AuditContext = AUDIT_DEL):
+    eliminados, desubicados = service.eliminar_estantes_lote(db, data.ids)
+    audit.registrar_accion(
+        f"Eliminó {eliminados} estante(s) en lote y dejó {desubicados} libro(s) sin ubicar",
+        modulo=_MODULO, accion="Eliminación",
+    )
+    return {"eliminados": eliminados, "desubicados": desubicados}
 
 
 # ─── Escritura: Niveles ("pisos" del estante — RF-02) ─────────────────────────
@@ -330,8 +454,34 @@ def eliminar_zona(
 @router.post("/colecciones", response_model=ColeccionResponse, status_code=status.HTTP_201_CREATED)
 def crear_coleccion(data: ColeccionCreate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
     obj = service.crear_coleccion(db, data)
-    audit.registrar_accion(f"Creó la colección '{obj.nombre}'", modulo=_MODULO, accion="Creación")
+    audit.registrar_accion(f"Creó la categoría '{obj.nombre}'", modulo=_MODULO, accion="Creación")
     return obj
+
+
+@router.put("/colecciones/{coleccion_id}", response_model=ColeccionResponse)
+def actualizar_coleccion(coleccion_id: uuid.UUID, data: ColeccionUpdate, db: Session = Depends(get_db), audit: AuditContext = AUDIT):
+    obj = service.actualizar_coleccion(db, coleccion_id, data)
+    audit.registrar_accion(_con_cambios(f"Editó la categoría '{obj.nombre}'", obj), modulo=_MODULO, accion="Edición")
+    return obj
+
+
+@router.delete("/colecciones/{coleccion_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_coleccion(
+    coleccion_id: uuid.UUID,
+    mover_a: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT,
+):
+    col = service.obtener_coleccion(db, coleccion_id)
+    nombre = col.nombre
+    movidos, destino = service.eliminar_coleccion(db, coleccion_id, mover_a)
+    if movidos and destino:
+        detalle = f" y movió {movidos} libro(s) a la categoría '{destino}'"
+    elif movidos:
+        detalle = f" y dejó {movidos} libro(s) sin categoría"
+    else:
+        detalle = ""
+    audit.registrar_accion(f"Eliminó la categoría '{nombre}'{detalle}", modulo=_MODULO, accion="Eliminación")
 
 
 # ─── Escritura: Campos personalizados (dinámicos) de libros ───────────────────

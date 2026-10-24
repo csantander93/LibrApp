@@ -55,6 +55,12 @@ class Estante(UUIDMixin, TimestampMixin, Base):
     zona_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("zonas.id", ondelete="SET NULL"), nullable=True,
     )
+    # Categoría del estante (reusa Coleccion — la "categoría taxonómica" del libro, RN-10).
+    # Al ubicar libros desde el panel del estante, se pre-filtran los sin ubicar de esta
+    # categoría. Nulo = estante sin categoría. SET NULL: borrar la categoría no rompe.
+    coleccion_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("colecciones.id", ondelete="SET NULL"), nullable=True,
+    )
     pos_x: Mapped[float] = mapped_column(Numeric(8, 2), default=0, nullable=False)
     pos_y: Mapped[float] = mapped_column(Numeric(8, 2), default=0, nullable=False)
     ancho: Mapped[float] = mapped_column(Numeric(8, 2), default=10, nullable=False)
@@ -67,12 +73,21 @@ class Estante(UUIDMixin, TimestampMixin, Base):
     color: Mapped[str | None] = mapped_column(String(9), nullable=True)
 
     zona: Mapped["Zona | None"] = relationship(back_populates="estantes")
+    coleccion: Mapped["Coleccion | None"] = relationship()  # categoría del estante
     libros: Mapped[list["Libro"]] = relationship(back_populates="estante")
     # Niveles ("pisos") del estante — se muestran a la izquierda de los libros en el mapa.
     niveles: Mapped[list["Nivel"]] = relationship(
         back_populates="estante",
         cascade="all, delete-orphan",
         order_by="Nivel.numero",
+    )
+    # Fotos de referencia del estante (vistas reales, formato vertical) — opcionales.
+    # Ayudan a ubicarlo de un vistazo: forma, color real y qué hay cerca. Se borran
+    # en cascada al eliminar el estante.
+    fotos: Mapped[list["EstanteImagen"]] = relationship(
+        back_populates="estante",
+        cascade="all, delete-orphan",
+        order_by="EstanteImagen.orden",
     )
 
 
@@ -95,6 +110,26 @@ class Nivel(UUIDMixin, TimestampMixin, Base):
 
     estante: Mapped["Estante"] = relationship(back_populates="niveles")
     libros: Mapped[list["Libro"]] = relationship(back_populates="nivel")
+
+
+class EstanteImagen(UUIDMixin, TimestampMixin, Base):
+    """Foto de referencia de un estante (vista real) — opcional.
+
+    Mismo esquema que `LibroImagen`: el binario vive en la propia DB (columna
+    diferida: no se trae en los listados, solo al servir la foto por su endpoint).
+    `orden` define la posición en la galería. No hay "principal" (son referencias).
+    """
+    __tablename__ = "imagenes_estante"
+
+    estante_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("estantes.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Diferida: los listados de estantes no cargan el binario (solo id/orden/tipo).
+    contenido: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, deferred=True)
+
+    estante: Mapped["Estante"] = relationship(back_populates="fotos")
 
 
 # Tipos de anotación/elemento decorativo que se pueden soltar sobre el plano.
@@ -151,6 +186,9 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     autor: Mapped[str] = mapped_column(String(255), nullable=False)
     editorial: Mapped[str] = mapped_column(String(100), nullable=False)
     precio: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # Sinopsis/reseña del libro (texto largo libre). Se muestra como panel de lectura
+    # en la ficha (admin y vista pública). Nulo = sin sinopsis cargada.
+    sinopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     coleccion_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("colecciones.id", ondelete="SET NULL"), nullable=True,

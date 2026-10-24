@@ -26,6 +26,7 @@ function estadoInicial(libro: Libro | null): LibroInput {
     editorial: libro?.editorial ?? "",
     isbn: libro?.isbn ?? "",
     precio: libro?.precio ?? "",
+    sinopsis: libro?.sinopsis ?? "",
     coleccion_id: libro?.coleccion_id ?? "",
     estante_id: libro?.estante_id ?? "",
     nivel_id: libro?.nivel_id ?? "",
@@ -64,6 +65,7 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
         ...form,
         isbn: form.isbn?.trim() || null,
         precio: form.precio?.toString().trim() || null,
+        sinopsis: form.sinopsis?.trim() || null,
         coleccion_id: form.coleccion_id || null,
         estante_id: form.estante_id || null,
         nivel_id: form.estante_id ? (form.nivel_id || null) : null,
@@ -148,9 +150,9 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
           </Campo>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Campo label="Colección">
+          <Campo label="Categoría">
             <Select value={form.coleccion_id ?? ""} onChange={(e) => set("coleccion_id")(e.target.value)}>
-              <option value="">— Sin colección —</option>
+              <option value="">— Sin categoría —</option>
               {colecciones.map((c) => (
                 <option key={c.id} value={c.id}>{c.nombre}</option>
               ))}
@@ -179,6 +181,16 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
             </Select>
           </Campo>
         )}
+
+        <Campo label="Sinopsis">
+          <textarea
+            value={form.sinopsis ?? ""}
+            onChange={(e) => set("sinopsis")(e.target.value)}
+            rows={5}
+            placeholder="Reseña o sinopsis del libro. Se muestra en la ficha como panel de lectura."
+            className="w-full resize-y rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm text-stone-900 shadow-sm transition-colors placeholder:text-stone-400 focus:border-unla focus:outline-none focus:ring-2 focus:ring-unla/25"
+          />
+        </Campo>
 
         {/* Campos personalizados (dinámicos) definidos por el admin. */}
         {camposActivos.map((campo) => (

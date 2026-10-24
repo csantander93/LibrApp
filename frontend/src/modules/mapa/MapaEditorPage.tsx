@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Save, Plus, Trash2, Loader2, Info, Layers,
-  Shapes, RotateCcw, RotateCw, Copy, ChevronUp, Search, X,
+  Shapes, RotateCcw, RotateCw, Copy, ChevronUp, Search, X, Pencil, Images,
 } from "lucide-react";
 import { Button } from "@/shared/components/ui/Button";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
+import { Modal } from "@/shared/components/ui/Modal";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
 import { ColorPicker } from "@/shared/components/ui/ColorPicker";
+import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
+import { urlFotoEstante } from "@/modules/catalogo/api";
 import { colorEstante } from "@/lib/utils";
 import type { Estante, Anotacion, AnotacionTipo } from "@/shared/types";
 import {
@@ -31,6 +35,7 @@ export function MapaEditorPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirmar = useConfirm();
+  const navigate = useNavigate();
   const { data: estantesServer, isLoading } = useQuery({ queryKey: ["estantes"], queryFn: listarEstantes });
   const { data: anotServer } = useQuery({ queryKey: ["anotaciones"], queryFn: listarAnotaciones });
   const { data: zonas = [] } = useQuery({ queryKey: ["zonas"], queryFn: listarZonas });
@@ -39,10 +44,14 @@ export function MapaEditorPage() {
   const [localEst, setLocalEst] = useState<Estante[]>([]);
   const [localAnot, setLocalAnot] = useState<Anotacion[]>([]);
   const [dirty, setDirty] = useState(false);
+  // Ids de estantes recién creados y aún sin guardar (borde luminoso en el mapa).
+  const [nuevosIds, setNuevosIds] = useState<Set<string>>(new Set());
   const [selEstId, setSelEstId] = useState<string | null>(null);
   const [selAnotId, setSelAnotId] = useState<string | null>(null);
   const [zonasModal, setZonasModal] = useState(false);
   const [estanteModal, setEstanteModal] = useState(false);
+  const [editarEst, setEditarEst] = useState<Estante | null>(null);
+  const [fotosAmpliadas, setFotosAmpliadas] = useState<Estante | null>(null);
   const [borrarEst, setBorrarEst] = useState<Estante | null>(null);
   const [borrarNivel, setBorrarNivel] = useState<Nivel | null>(null);
   const [paletaAbierta, setPaletaAbierta] = useState(false);
@@ -62,6 +71,39 @@ export function MapaEditorPage() {
     if (!zonas.length) return;
     if (!zonaId || !zonas.some((z) => z.id === zonaId)) setZonaId(zonas[0].id);
   }, [zonas, zonaId]);
+
+  // ── Aviso al salir con cambios sin guardar (RF-10) ───────────────────────────
+  // Cubre la recarga/cierre del navegador (beforeunload) y la navegación interna
+  // (clic en el menú lateral): se intercepta el clic y se pide confirmación.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", onBeforeUnload);
+
+    const onClickCapture = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as HTMLElement)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || a.target === "_blank") return;
+      const href = a.getAttribute("href") ?? "";
+      if (!href.startsWith("/") || href.startsWith("//")) return; // enlaces externos
+      if (href.split(/[?#]/)[0] === "/admin/mapa") return;        // misma vista
+      e.preventDefault();
+      e.stopPropagation();
+      confirmar({
+        titulo: "Cambios sin guardar",
+        mensaje: "Tenés cambios en el mapa sin guardar. Si salís ahora se perderán.",
+        confirmar: "Salir sin guardar",
+        cancelar: "Seguir editando",
+        tono: "default",
+      }).then((ok) => { if (ok) { setDirty(false); navigate(href); } });
+    };
+    document.addEventListener("click", onClickCapture, true);
+
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClickCapture, true);
+    };
+  }, [dirty, confirmar, navigate]);
 
   const selEstante = localEst.find((e) => e.id === selEstId) ?? null;
 
@@ -116,6 +158,7 @@ export function MapaEditorPage() {
     },
     onSuccess: () => {
       setDirty(false);
+      setNuevosIds(new Set()); // ya guardados: dejan de ser "nuevos"
       qc.invalidateQueries({ queryKey: ["estantes"] });
       qc.invalidateQueries({ queryKey: ["anotaciones"] });
       toast.success("Cambios guardados");
@@ -124,8 +167,19 @@ export function MapaEditorPage() {
   });
 
   // ── Alta de estante: alta optimista tras crearlo en el modal ─────────────────
+  // Aparece CENTRADO en el mapa (no en 0,0), con borde luminoso y por encima del
+  // resto hasta que se guarde. Si ya hay otros nuevos, se escalona para no taparlos.
   function onEstanteCreado(nuevo: Estante) {
-    setLocalEst((prev) => (prev.some((e) => e.id === nuevo.id) ? prev : [...prev, nuevo]));
+    const n = nuevosIds.size;
+    const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max);
+    const centrado: Estante = {
+      ...nuevo,
+      pos_x: clamp(50 - nuevo.ancho / 2 + n * 3, 100 - nuevo.ancho),
+      pos_y: clamp(50 - nuevo.alto / 2 + n * 3, 100 - nuevo.alto),
+    };
+    setLocalEst((prev) => (prev.some((e) => e.id === nuevo.id) ? prev : [...prev, centrado]));
+    setNuevosIds((prev) => new Set(prev).add(nuevo.id));
+    setDirty(true);
     setSelEstId(nuevo.id);
     setSelAnotId(null);
   }
@@ -135,6 +189,10 @@ export function MapaEditorPage() {
       eliminarEstante(id, reasignarA),
     onSuccess: (_d, { id, reasignarA }) => {
       setLocalEst((prev) => prev.filter((e) => e.id !== id));
+      setNuevosIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev); next.delete(id); return next;
+      });
       setSelEstId(null);
       setBorrarEst(null);
       qc.invalidateQueries({ queryKey: ["estantes"] });
@@ -453,6 +511,7 @@ export function MapaEditorPage() {
                 textura={zonaActual?.textura ?? null}
                 modo="editar"
                 resaltados={resaltados}
+                nuevos={nuevosIds}
                 seleccionadoId={selEstId}
                 seleccionadoAnotId={selAnotId}
                 onSeleccionar={(e) => { setSelEstId((prev) => prev === e.id ? null : e.id); setSelAnotId(null); }}
@@ -516,6 +575,34 @@ export function MapaEditorPage() {
               <p className="mt-0.5 text-[10px] text-stone-400">
                 {Math.round(selEstante.ancho)} × {Math.round(selEstante.alto)} · arrastrá esquina
               </p>
+
+              {/* Fotos de referencia (vista) — editar/agregar desde "Editar estante" */}
+              <div className="mt-3">
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                    <Images className="h-3 w-3" /> Fotos
+                  </p>
+                  <Button variant="ghost" className="px-1.5 py-0.5 text-[11px]" onClick={() => setEditarEst(selEstante)}>
+                    <Pencil className="h-3 w-3" /> Editar estante
+                  </Button>
+                </div>
+                {selEstante.fotos.length > 0 ? (
+                  <div className="w-full">
+                    <ImagenCarrusel
+                      imagenes={selEstante.fotos}
+                      resolverUrl={urlFotoEstante}
+                      ajuste="natural"
+                      maxAltoClase="max-h-56"
+                      alt={`Estante ${selEstante.codigo}`}
+                      onAmpliar={() => setFotosAmpliadas(selEstante)}
+                    />
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-stone-200 bg-stone-50/60 px-2 py-3 text-center text-[10px] text-stone-400">
+                    No hay imagen de referencia. Agregala en <span className="font-medium">Editar estante</span>.
+                  </p>
+                )}
+              </div>
 
               <div className="mt-3">
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500">Color</p>
@@ -736,6 +823,31 @@ export function MapaEditorPage() {
           zonaIdDefault={zonaId || null}
           onCreado={onEstanteCreado}
         />
+      )}
+
+      {editarEst && (
+        <EstanteFormModal
+          onClose={() => setEditarEst(null)}
+          estante={editarEst}
+          zonas={zonas}
+        />
+      )}
+
+      {fotosAmpliadas && fotosAmpliadas.fotos.length > 0 && (
+        <Modal
+          abierto
+          onClose={() => setFotosAmpliadas(null)}
+          titulo={`Fotos — ${fotosAmpliadas.codigo}`}
+          ancho="max-w-lg"
+        >
+          <ImagenCarrusel
+            imagenes={fotosAmpliadas.fotos}
+            resolverUrl={urlFotoEstante}
+            ajuste="natural"
+            maxAltoClase="max-h-[70vh]"
+            alt={`Estante ${fotosAmpliadas.codigo}`}
+          />
+        </Modal>
       )}
     </div>
   );

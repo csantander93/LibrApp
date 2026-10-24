@@ -15,3 +15,5 @@ python-multipart==0.0.18
 python-dotenv==1.0.1
 # Lectura de .xlsx en el importador de catálogo (RF-05).
 openpyxl==3.1.5
+# Conversión de imágenes a WEBP al subir (optimiza el espacio en disco).
+Pillow==11.0.0

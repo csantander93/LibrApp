@@ -98,10 +98,10 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 | `/` | Autoconsulta pública (RF-07) |
 | `/login` | Login del administrador |
 | `/admin` | Dashboard con KPIs |
-| `/admin/catalogo` | ABM de libros (RF-04/RF-06/RF-09) |
+| `/admin/catalogo` | ABM de libros (RF-04/RF-06/RF-09) + importador Excel/CSV con dry-run, que es un **modal** (`ImportarModal`, botón "Importar"), NO una ruta propia (RF-05/CU-04) |
+| `/admin/categorias` | Gestión de categorías (= colecciones, RN-10) |
 | `/admin/estantes` | ABM de estantes (RF-02) |
 | `/admin/mapa` | Editor de mapa 2D con drag & resize (RF-01/RF-10/RF-11) |
-| `/admin/importar` | Importador Excel/CSV con dry-run (RF-05/CU-04) |
 | `/admin/registros` | Registros de auditoría (permiso `registros.ver`) |
 | `/admin/configuracion` | Ajustes + pestañas **Usuarios** y **Roles** (RF-08); las pestañas se muestran según permiso |
 
@@ -113,8 +113,15 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 - **RN-05**: toda escritura (ABM, import, guardar posiciones) va detrás de `require_admin`.
   La lectura del catálogo es pública (vista de autoconsulta, RF-07).
 - **RN-07/RN-09**: `estante_id` nulo = "Sin ubicar"; el import deja así lo que no matchea estante.
-- **RN-08** (y análogo para zonas): no se puede eliminar un estante con libros, ni una zona
-  con estantes (409 con mensaje explicativo).
+- **RN-08** (y análogo para zonas y **categorías**): no se puede eliminar un estante con libros,
+  ni una zona con estantes (409). Las categorías sí se pueden borrar: nunca borran libros, los
+  **reasignan** (`mover_a=<otra>` los mueve; `mover_a=None` los deja sin categoría).
+- **RN-10 / "categorías"**: lo que la UI llama **Categoría** es el modelo `Coleccion` (tabla
+  `colecciones`) — ojo con el doble nombre. Un libro tiene `coleccion_id` (su categoría) y un
+  estante tiene su propia `coleccion_id` (la categoría "temática" del estante). Esto habilita el
+  flujo "ubicación por categoría" y la asignación en lote (`service.py`, `asignar_categoria`).
+- **`sinopsis`**: campo texto largo opcional del libro; se muestra como panel de lectura en la
+  ficha (admin y vista pública). Nulo = sin sinopsis.
 - **Usuarios/roles** (módulo `usuarios`, gating con `usuarios.gestionar`): username único;
   no podés eliminar tu propia cuenta ni quitarte a vos mismo el permiso de gestión; siempre
   debe quedar ≥1 usuario activo con `usuarios.gestionar`; el rol de sistema ("Administrador",

@@ -14,6 +14,7 @@ CATALOGO = "catalogo.gestionar"
 ESTANTES = "estantes.gestionar"
 MAPA = "mapa.gestionar"
 IMPORTAR = "importar.ejecutar"
+ELIMINAR = "eliminar.ejecutar"
 REGISTROS = "registros.ver"
 CONFIGURACION = "configuracion.editar"
 USUARIOS = "usuarios.gestionar"
@@ -32,6 +33,8 @@ PERMISOS: list[dict] = [
      "descripcion": "Editar el mapa 2D: posiciones, anotaciones y orden de los libros."},
     {"key": IMPORTAR, "etiqueta": "Importar", "grupo": "Contenido",
      "descripcion": "Importar libros desde archivos Excel/CSV."},
+    {"key": ELIMINAR, "etiqueta": "Eliminar en lote y purgar", "grupo": "Contenido",
+     "descripcion": "Borrado múltiple por selección y purga total del catálogo de libros."},
     {"key": REGISTROS, "etiqueta": "Registros", "grupo": "Administración",
      "descripcion": "Ver la auditoría de accesos y acciones del panel."},
     {"key": CONFIGURACION, "etiqueta": "Configuración", "grupo": "Administración",

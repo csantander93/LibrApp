@@ -13,6 +13,9 @@ interface Props {
   seleccionadoId?: string | null;
   seleccionadoAnotId?: string | null;
   resaltados?: Set<string>;
+  /** Estantes recién creados y aún sin guardar: se muestran con borde luminoso
+   *  pulsante y por encima del resto, hasta que se guardan. */
+  nuevos?: Set<string>;
   onSeleccionar?: (estante: Estante) => void;
   onSeleccionarAnotacion?: (a: Anotacion) => void;
   onMover?: (id: string, pos_x: number, pos_y: number) => void;
@@ -59,7 +62,7 @@ function CtrlBtn({ label, onClick, children }: { label: string; onClick?: () => 
 
 export function MapaCanvas({
   estantes, anotaciones = [], textura, modo = "ver",
-  seleccionadoId, seleccionadoAnotId, resaltados,
+  seleccionadoId, seleccionadoAnotId, resaltados, nuevos,
   onSeleccionar, onSeleccionarAnotacion, onMover, onResize, onRotar,
   onMoverAnotacion, onResizeAnotacion, onRotarAnotacion, onEditar, onAgregar,
   expandido, onExpandir,
@@ -232,6 +235,7 @@ export function MapaCanvas({
           {estantes.map((est) => {
             const resaltado = resaltados?.has(est.id);
             const seleccionado = seleccionadoId === est.id;
+            const nuevo = nuevos?.has(est.id);
             const color = colorEstante(est.color, est.zona_id);
             const borde = oscurecer(color, 0.78);
             return (
@@ -242,9 +246,10 @@ export function MapaCanvas({
                 onPointerUp={onUp}
                 onClick={() => onSeleccionar?.(est)}
                 className={cn(
-                  "group absolute z-[5] flex items-center justify-center rounded-md p-1 text-center transition-shadow duration-200",
+                  "group absolute flex items-center justify-center rounded-md p-1 text-center transition-shadow duration-200",
                   modo === "editar" ? "cursor-move touch-none" : "cursor-pointer",
-                  "hover:z-[6]",
+                  // Los nuevos (sin guardar) quedan por encima del resto.
+                  nuevo ? "z-[8]" : "z-[5] hover:z-[6]",
                 )}
                 style={{
                   left: `${est.pos_x}%`, top: `${est.pos_y}%`,
@@ -252,7 +257,9 @@ export function MapaCanvas({
                   transform: `rotate(${est.rotacion ?? 0}deg)`,
                   background: color,
                   border: `2px solid ${borde}`,
-                  boxShadow: resaltado
+                  boxShadow: nuevo
+                    ? "0 0 0 3px #F9F8F6, 0 0 0 6px #34D399, 0 0 26px 8px rgba(16,185,129,0.65)"
+                    : resaltado
                     ? "0 0 0 3px #F9F8F6, 0 0 0 6px #E69D45, 0 0 22px 4px rgba(230,157,69,0.6)"
                     : seleccionado
                     ? "0 0 0 3px #F9F8F6, 0 0 0 6px #E69D45, 0 4px 12px rgba(0,0,0,0.2)"
@@ -260,6 +267,10 @@ export function MapaCanvas({
                 }}
                 title={est.etiqueta ?? est.codigo}
               >
+                {/* Destello pulsante mientras el estante es nuevo (sin guardar). */}
+                {nuevo && (
+                  <span className="pointer-events-none absolute -inset-1 rounded-lg ring-2 ring-emerald-400/90 animate-pulse" />
+                )}
                 <span className="pointer-events-none max-w-full truncate rounded bg-black/25 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
                   {est.codigo}
                 </span>

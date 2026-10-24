@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import type {
   Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
-  Anotacion, AnotacionTipo, LibroImagen, CampoLibro, CampoLibroInput, TexturaPiso,
+  Anotacion, AnotacionTipo, LibroImagen, EstanteImagen, CampoLibro, CampoLibroInput, TexturaPiso,
 } from "@/shared/types";
 
 // ─── Lectura ──────────────────────────────────────────────────────────────────
@@ -12,6 +12,10 @@ export interface LibroFiltros {
   estante_id?: string;
   nivel_id?: string;
   sin_ubicar?: boolean;
+  precio_min?: string;
+  precio_max?: string;
+  autor?: string;
+  editorial?: string;
 }
 
 export async function listarLibros(filtros: LibroFiltros = {}): Promise<Libro[]> {
@@ -21,6 +25,10 @@ export async function listarLibros(filtros: LibroFiltros = {}): Promise<Libro[]>
   if (filtros.estante_id) params.estante_id = filtros.estante_id;
   if (filtros.nivel_id) params.nivel_id = filtros.nivel_id;
   if (filtros.sin_ubicar) params.sin_ubicar = "true";
+  if (filtros.precio_min) params.precio_min = filtros.precio_min;
+  if (filtros.precio_max) params.precio_max = filtros.precio_max;
+  if (filtros.autor) params.autor = filtros.autor;
+  if (filtros.editorial) params.editorial = filtros.editorial;
   const { data } = await api.get<Libro[]>("/catalogo/libros", { params });
   return data;
 }
@@ -87,6 +95,51 @@ export async function eliminarLibro(id: string): Promise<void> {
   await api.delete(`/catalogo/libros/${id}`);
 }
 
+// ─── Borrado en lote y purga (permiso eliminar.ejecutar) ──────────────────────
+
+/** Borra en lote los libros indicados. Devuelve cuántos se eliminaron. */
+export async function eliminarLibrosLote(ids: string[]): Promise<number> {
+  const { data } = await api.post<{ eliminados: number }>("/catalogo/libros/eliminar-lote", { ids });
+  return data.eliminados;
+}
+
+/** Purga TODO el catálogo de libros (acción peligrosa). Devuelve cuántos se eliminaron. */
+export async function purgarCatalogo(): Promise<number> {
+  const { data } = await api.post<{ eliminados: number }>("/catalogo/libros/purgar");
+  return data.eliminados;
+}
+
+/** Asigna (o quita, con coleccion_id=null) la categoría a los libros indicados.
+ *  Devuelve cuántos se actualizaron. */
+export async function asignarCategoriaLote(ids: string[], coleccion_id: string | null): Promise<number> {
+  const { data } = await api.post<{ actualizados: number }>(
+    "/catalogo/libros/categoria-lote",
+    { ids, coleccion_id },
+  );
+  return data.actualizados;
+}
+
+/** Ubica en lote los libros indicados en un estante (y opcionalmente un nivel).
+ *  estante_id=null los deja 'Sin ubicar'. Devuelve cuántos se actualizaron. */
+export async function ubicarLibrosLote(
+  ids: string[], estante_id: string | null, nivel_id: string | null,
+): Promise<number> {
+  const { data } = await api.post<{ actualizados: number }>(
+    "/catalogo/libros/ubicar-lote",
+    { ids, estante_id, nivel_id },
+  );
+  return data.actualizados;
+}
+
+/** Borra en lote los estantes indicados; sus libros quedan 'Sin ubicar'. */
+export async function eliminarEstantesLote(ids: string[]): Promise<{ eliminados: number; desubicados: number }> {
+  const { data } = await api.post<{ eliminados: number; desubicados: number }>(
+    "/catalogo/estantes/eliminar-lote",
+    { ids },
+  );
+  return data;
+}
+
 // ─── Orden manual de libros (drag & drop de lomos en el mapa) ──────────────────
 
 export interface LibroOrden {
@@ -126,12 +179,31 @@ export async function eliminarImagenLibro(imagenId: string): Promise<void> {
   await api.delete(`/catalogo/imagenes/${imagenId}`);
 }
 
+// ─── Fotos de referencia de estantes ──────────────────────────────────────────
+
+/** URL pública para mostrar una foto de estante en un <img src>. */
+export function urlFotoEstante(fotoId: string): string {
+  return `${api.defaults.baseURL}/catalogo/estante-fotos/${fotoId}`;
+}
+
+export async function subirFotosEstante(estanteId: string, archivos: File[]): Promise<EstanteImagen[]> {
+  const form = new FormData();
+  archivos.forEach((f) => form.append("archivos", f));
+  const { data } = await api.post<EstanteImagen[]>(`/catalogo/estantes/${estanteId}/fotos`, form);
+  return data;
+}
+
+export async function eliminarFotoEstante(fotoId: string): Promise<void> {
+  await api.delete(`/catalogo/estante-fotos/${fotoId}`);
+}
+
 // ─── Estantes (escritura) ─────────────────────────────────────────────────────
 
 export interface EstanteInput {
   codigo: string;
   etiqueta: string | null;
   zona_id: string | null;
+  coleccion_id?: string | null;
   color?: string | null;
   cantidad_niveles?: number;
 }
@@ -262,12 +334,50 @@ export async function eliminarCampo(id: string): Promise<void> {
 
 // ─── Colecciones (escritura) ──────────────────────────────────────────────────
 
-export async function crearColeccion(nombre: string): Promise<Coleccion> {
-  const { data } = await api.post<Coleccion>("/catalogo/colecciones", { nombre });
+export interface ColeccionInput {
+  nombre: string;
+  descripcion?: string | null;
+}
+
+export async function crearColeccion(nombre: string, descripcion?: string | null): Promise<Coleccion> {
+  const { data } = await api.post<Coleccion>("/catalogo/colecciones", { nombre, descripcion });
   return data;
 }
 
+export async function actualizarColeccion(id: string, input: Partial<ColeccionInput>): Promise<Coleccion> {
+  const { data } = await api.put<Coleccion>(`/catalogo/colecciones/${id}`, input);
+  return data;
+}
+
+/** Elimina una categoría. Si tiene libros: `moverA` = id de otra categoría donde
+ *  reasignarlos, o null/undefined para dejarlos sin categoría (RN-08 análogo). */
+export async function eliminarColeccion(id: string, moverA?: string | null): Promise<void> {
+  await api.delete(`/catalogo/colecciones/${id}`, {
+    params: moverA ? { mover_a: moverA } : undefined,
+  });
+}
+
 // ─── Importación ──────────────────────────────────────────────────────────────
+
+/** Descarga la plantilla ("bandeja") vacía a completar, en CSV o XLSX. */
+export async function descargarPlantilla(formato: "csv" | "xlsx"): Promise<void> {
+  const { data, headers } = await api.get("/catalogo/libros/plantilla", {
+    params: { formato },
+    responseType: "blob",
+  });
+  // Nombre del archivo: el que manda el backend (Content-Disposition) o uno por defecto.
+  const disp = (headers["content-disposition"] as string | undefined) ?? "";
+  const match = disp.match(/filename="?([^"]+)"?/);
+  const nombre = match?.[1] ?? `plantilla_importacion_librapp.${formato}`;
+  const url = URL.createObjectURL(data as Blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export async function importarLibros(archivo: File, dryRun: boolean): Promise<ImportResultado> {
   const form = new FormData();

@@ -1,16 +1,20 @@
+import io
 import re
 import uuid
 import unicodedata
 from datetime import date
+from PIL import Image, ImageOps
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.catalogo.models import (
-    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen, CampoLibro,
+    Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel, LibroImagen,
+    EstanteImagen, CampoLibro,
 )
 from app.modules.catalogo.schemas import (
     LibroResponse, EstanteResponse, NivelResponse, LibroCreate, LibroUpdate,
-    EstanteCreate, EstanteUpdate, ColeccionCreate, ZonaCreate, ZonaUpdate,
+    EstanteCreate, EstanteUpdate, ColeccionResponse, ColeccionCreate, ColeccionUpdate,
+    ZonaCreate, ZonaUpdate,
     NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate,
     CampoLibroCreate, CampoLibroUpdate,
@@ -52,7 +56,10 @@ def _to_estante_response(
         pos_x=float(e.pos_x), pos_y=float(e.pos_y),
         ancho=float(e.ancho), alto=float(e.alto),
         rotacion=float(e.rotacion), color=e.color,
+        coleccion_id=e.coleccion_id,
+        coleccion_nombre=e.coleccion.nombre if e.coleccion else None,
         total_libros=total_libros, niveles=niveles,
+        fotos=[f.id for f in sorted(e.fotos, key=lambda f: f.orden)],
     )
 
 
@@ -62,8 +69,21 @@ def listar_zonas(db: Session) -> list[Zona]:
     return db.query(Zona).order_by(Zona.orden, Zona.nombre).all()
 
 
-def listar_colecciones(db: Session) -> list[Coleccion]:
-    return db.query(Coleccion).order_by(Coleccion.nombre).all()
+def listar_colecciones(db: Session) -> list[ColeccionResponse]:
+    """Categorías con su conteo de libros denormalizado (para el ABM de Categorías)."""
+    conteos = dict(
+        db.query(Libro.coleccion_id, func.count(Libro.id))
+        .filter(Libro.coleccion_id.isnot(None))
+        .group_by(Libro.coleccion_id)
+        .all()
+    )
+    return [
+        ColeccionResponse(
+            id=c.id, nombre=c.nombre, descripcion=c.descripcion,
+            total_libros=conteos.get(c.id, 0),
+        )
+        for c in db.query(Coleccion).order_by(Coleccion.nombre).all()
+    ]
 
 
 def listar_estantes(db: Session) -> list[EstanteResponse]:
@@ -82,7 +102,14 @@ def listar_estantes(db: Session) -> list[EstanteResponse]:
         .all()
     )
     estantes = (
-        db.query(Estante).options(selectinload(Estante.niveles)).order_by(Estante.codigo).all()
+        db.query(Estante)
+        .options(
+            selectinload(Estante.niveles),
+            selectinload(Estante.coleccion),
+            selectinload(Estante.fotos),  # solo ids/orden; el binario es diferido
+        )
+        .order_by(Estante.codigo)
+        .all()
     )
     return [_to_estante_response(e, conteos.get(e.id, 0), conteos_nivel) for e in estantes]
 
@@ -90,7 +117,7 @@ def listar_estantes(db: Session) -> list[EstanteResponse]:
 def _to_libro_response(lb: Libro) -> LibroResponse:
     return LibroResponse(
         id=lb.id, isbn=lb.isbn, titulo=lb.titulo, autor=lb.autor,
-        editorial=lb.editorial, precio=lb.precio,
+        editorial=lb.editorial, precio=lb.precio, sinopsis=lb.sinopsis,
         coleccion_id=lb.coleccion_id, estante_id=lb.estante_id, nivel_id=lb.nivel_id,
         orden=lb.orden,
         estante_codigo=lb.estante.codigo if lb.estante else None,
@@ -110,6 +137,10 @@ def listar_libros(
     estante_id=None,
     nivel_id=None,
     sin_ubicar: bool | None = None,
+    precio_min=None,
+    precio_max=None,
+    autor: str | None = None,
+    editorial: str | None = None,
 ) -> list[LibroResponse]:
     """Listado con filtros (RF-06). Búsqueda case-insensitive por título/autor/ISBN (CU-01)."""
     query = db.query(Libro).options(
@@ -129,6 +160,16 @@ def listar_libros(
         query = query.filter(Libro.nivel_id == nivel_id)
     if sin_ubicar is True:
         query = query.filter(Libro.estante_id.is_(None))
+    # Filtros dedicados del panel de "Filtros" del catálogo: rango de precio y
+    # autor/editorial por separado (independientes de la búsqueda general `q`).
+    if precio_min is not None:
+        query = query.filter(Libro.precio.isnot(None), Libro.precio >= precio_min)
+    if precio_max is not None:
+        query = query.filter(Libro.precio.isnot(None), Libro.precio <= precio_max)
+    if autor and autor.strip():
+        query = query.filter(Libro.autor.ilike(f"%{autor.strip()}%"))
+    if editorial and editorial.strip():
+        query = query.filter(Libro.editorial.ilike(f"%{editorial.strip()}%"))
     # Orden manual primero (reordenamiento de lomos en el mapa), título como
     # desempate estable.
     return [_to_libro_response(lb) for lb in query.order_by(Libro.orden, Libro.titulo).all()]
@@ -309,13 +350,101 @@ def eliminar_libro(db: Session, libro_id: uuid.UUID) -> None:
     db.commit()
 
 
+def eliminar_libros_lote(db: Session, ids: list[uuid.UUID]) -> int:
+    """Borra en lote los libros indicados (selección múltiple). Las imágenes caen
+    por el FK `imagenes_libro.libro_id` con ondelete CASCADE. Devuelve cuántos se
+    borraron."""
+    if not ids:
+        return 0
+    eliminados = (
+        db.query(Libro).filter(Libro.id.in_(ids)).delete(synchronize_session=False)
+    )
+    db.commit()
+    return eliminados
+
+
+def purgar_catalogo(db: Session) -> int:
+    """Borra TODOS los libros del catálogo (acción peligrosa, gateada por el permiso
+    `eliminar.ejecutar`). Conserva colecciones, campos, estantes y zonas. Las imágenes
+    caen en cascada. Devuelve cuántos libros se eliminaron."""
+    total = db.query(func.count(Libro.id)).scalar() or 0
+    db.query(Libro).delete(synchronize_session=False)
+    db.commit()
+    return total
+
+
+def asignar_categoria_lote(db: Session, ids: list[uuid.UUID], coleccion_id) -> int:
+    """Asigna (o quita, con coleccion_id=None) la categoría a los libros indicados
+    (selección múltiple en el catálogo). Devuelve cuántos se actualizaron."""
+    if not ids:
+        return 0
+    if coleccion_id and not db.get(Coleccion, coleccion_id):
+        raise NotFoundError("La categoría indicada no existe")
+    actualizados = (
+        db.query(Libro)
+        .filter(Libro.id.in_(ids))
+        .update({Libro.coleccion_id: coleccion_id}, synchronize_session=False)
+    )
+    db.commit()
+    return actualizados
+
+
+def ubicar_libros_lote(db: Session, ids: list[uuid.UUID], estante_id, nivel_id) -> int:
+    """Ubica en lote los libros indicados en un estante (y opcionalmente un nivel).
+    estante_id=None los deja 'Sin ubicar' (RN-07/RN-09). Valida que el nivel pertenezca
+    al estante (reusa _resolver_nivel). Devuelve cuántos se actualizaron."""
+    if not ids:
+        return 0
+    if estante_id is not None:
+        if not db.get(Estante, estante_id):
+            raise NotFoundError("El estante indicado no existe")
+        nivel_id = _resolver_nivel(db, estante_id, nivel_id, nivel_explicito=True)
+    else:
+        nivel_id = None  # sin estante no hay nivel posible
+    actualizados = (
+        db.query(Libro)
+        .filter(Libro.id.in_(ids))
+        .update(
+            {Libro.estante_id: estante_id, Libro.nivel_id: nivel_id},
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return actualizados
+
+
 # ─── Imágenes del libro (portada / vistas) ────────────────────────────────────
 
-# Tope de imágenes por libro y tamaño máximo por archivo (5 MB). Tipos aceptados:
-# formatos web usuales. Sin procesamiento (no se recomprime ni redimensiona).
+# Tope de imágenes por libro y tamaño máximo por archivo (5 MB) del archivo subido.
+# Tipos aceptados a la entrada: formatos web usuales. TODAS se convierten a WEBP
+# al guardar (ver `_a_webp`) para optimizar el espacio en disco.
 MAX_IMAGENES_LIBRO = 5
 MAX_IMAGEN_BYTES = 5 * 1024 * 1024
 CONTENT_TYPES_IMAGEN = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
+WEBP_CONTENT_TYPE = "image/webp"
+
+
+def _a_webp(contenido: bytes) -> bytes:
+    """Convierte una imagen soportada a WEBP (optimiza el espacio en disco).
+
+    Respeta la orientación EXIF (fotos de celular giradas) y conserva la
+    transparencia cuando la hay. Lanza ValidationError si el archivo no es una
+    imagen procesable."""
+    try:
+        with Image.open(io.BytesIO(contenido)) as img:
+            # Aplica la rotación declarada en los metadatos EXIF (celulares).
+            img = ImageOps.exif_transpose(img)
+            if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
+                img = img.convert("RGBA")
+            else:
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="WEBP", quality=82, method=6)
+            return buf.getvalue()
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError("No se pudo procesar la imagen (archivo dañado o formato no soportado)")
 
 
 def obtener_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
@@ -342,12 +471,13 @@ def agregar_imagen(
     )
     if total >= MAX_IMAGENES_LIBRO:
         raise ConflictError(f"Un libro admite hasta {MAX_IMAGENES_LIBRO} imágenes")
+    contenido = _a_webp(contenido)  # se guarda siempre en WEBP
     max_orden = (
         db.query(func.max(LibroImagen.orden)).filter(LibroImagen.libro_id == libro_id).scalar()
     )
     siguiente = 0 if max_orden is None else max_orden + 1
     img = LibroImagen(
-        libro_id=libro_id, orden=siguiente, content_type=content_type, contenido=contenido,
+        libro_id=libro_id, orden=siguiente, content_type=WEBP_CONTENT_TYPE, contenido=contenido,
     )
     db.add(img)
     db.commit()
@@ -396,6 +526,74 @@ def hacer_principal_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
     return img
 
 
+# ─── Fotos de referencia del estante ──────────────────────────────────────────
+
+# Mismo tope de tamaño y tipos que las imágenes de libro; hasta 8 fotos por estante.
+MAX_FOTOS_ESTANTE = 8
+
+
+def obtener_foto_estante(db: Session, foto_id: uuid.UUID) -> EstanteImagen:
+    foto = db.get(EstanteImagen, foto_id)
+    if not foto:
+        raise NotFoundError("Foto no encontrada")
+    return foto
+
+
+def agregar_foto_estante(
+    db: Session, estante_id: uuid.UUID, content_type: str, contenido: bytes,
+) -> EstanteImagen:
+    """Agrega una foto al final de la galería del estante. Valida tipo, tamaño y
+    el tope por estante."""
+    obtener_estante(db, estante_id)
+    if content_type not in CONTENT_TYPES_IMAGEN:
+        raise ValidationError("Formato de imagen no admitido (usá JPG, PNG, WEBP, GIF o AVIF)")
+    if not contenido:
+        raise ValidationError("El archivo está vacío")
+    if len(contenido) > MAX_IMAGEN_BYTES:
+        raise ValidationError("La imagen supera el tamaño máximo (5 MB)")
+    total = (
+        db.query(func.count(EstanteImagen.id)).filter(EstanteImagen.estante_id == estante_id).scalar() or 0
+    )
+    if total >= MAX_FOTOS_ESTANTE:
+        raise ConflictError(f"Un estante admite hasta {MAX_FOTOS_ESTANTE} fotos")
+    contenido = _a_webp(contenido)  # se guarda siempre en WEBP
+    max_orden = (
+        db.query(func.max(EstanteImagen.orden)).filter(EstanteImagen.estante_id == estante_id).scalar()
+    )
+    siguiente = 0 if max_orden is None else max_orden + 1
+    foto = EstanteImagen(
+        estante_id=estante_id, orden=siguiente, content_type=WEBP_CONTENT_TYPE, contenido=contenido,
+    )
+    db.add(foto)
+    db.commit()
+    db.refresh(foto)
+    return foto
+
+
+def _renumerar_fotos_estante(db: Session, estante_id: uuid.UUID) -> None:
+    """Deja el `orden` de las fotos contiguo (0..N) según el orden actual."""
+    fotos = (
+        db.query(EstanteImagen)
+        .filter(EstanteImagen.estante_id == estante_id)
+        .order_by(EstanteImagen.orden)
+        .all()
+    )
+    for idx, foto in enumerate(fotos):
+        if foto.orden != idx:
+            foto.orden = idx
+
+
+def eliminar_foto_estante(db: Session, foto_id: uuid.UUID) -> uuid.UUID:
+    """Elimina una foto y renumera el resto. Devuelve el id del estante afectado."""
+    foto = obtener_foto_estante(db, foto_id)
+    estante_id = foto.estante_id
+    db.delete(foto)
+    db.flush()
+    _renumerar_fotos_estante(db, estante_id)
+    db.commit()
+    return estante_id
+
+
 # ─── Escritura: Estante ───────────────────────────────────────────────────────
 
 def _validar_codigo_estante(db: Session, codigo: str, zona_id, excluir_id=None) -> None:
@@ -417,6 +615,8 @@ def obtener_estante(db: Session, estante_id: uuid.UUID) -> Estante:
 def crear_estante(db: Session, data: EstanteCreate) -> EstanteResponse:
     if data.zona_id and not db.get(Zona, data.zona_id):
         raise NotFoundError("La zona indicada no existe")
+    if data.coleccion_id and not db.get(Coleccion, data.coleccion_id):
+        raise NotFoundError("La categoría indicada no existe")
     _validar_codigo_estante(db, data.codigo, data.zona_id)
     campos = data.model_dump()
     cantidad = campos.pop("cantidad_niveles", 1)
@@ -438,6 +638,8 @@ def actualizar_estante(db: Session, estante_id: uuid.UUID, data: EstanteUpdate) 
     nueva_zona = cambios.get("zona_id", e.zona_id)
     if "zona_id" in cambios and cambios["zona_id"] and not db.get(Zona, cambios["zona_id"]):
         raise NotFoundError("La zona indicada no existe")
+    if cambios.get("coleccion_id") and not db.get(Coleccion, cambios["coleccion_id"]):
+        raise NotFoundError("La categoría indicada no existe")
     if "codigo" in cambios or "zona_id" in cambios:
         _validar_codigo_estante(db, nuevo_codigo, nueva_zona, excluir_id=estante_id)
     desc = describir_cambios(diff_cambios(e, cambios))
@@ -570,6 +772,23 @@ def eliminar_estante(
     db.delete(e)
     db.commit()
     return len(libros), destino_codigo
+
+
+def eliminar_estantes_lote(db: Session, ids: list[uuid.UUID]) -> tuple[int, int]:
+    """Borra en lote los estantes indicados (selección múltiple). Los libros de esos
+    estantes quedan 'Sin ubicar' (RN-07/RN-09): borrar el estante hace SET NULL en
+    `libros.estante_id` (FK ondelete SET NULL) y la cascada de `niveles` deja
+    `libros.nivel_id` en NULL. Devuelve (estantes_eliminados, libros_desubicados)."""
+    if not ids:
+        return 0, 0
+    desubicados = (
+        db.query(func.count(Libro.id)).filter(Libro.estante_id.in_(ids)).scalar() or 0
+    )
+    eliminados = (
+        db.query(Estante).filter(Estante.id.in_(ids)).delete(synchronize_session=False)
+    )
+    db.commit()
+    return eliminados, desubicados
 
 
 # ─── Escritura: Niveles ("pisos" del estante) ─────────────────────────────────
@@ -727,15 +946,77 @@ def eliminar_zona(db: Session, zona_id: uuid.UUID, mover_a: uuid.UUID | None = N
 
 # ─── Escritura: Colección (RN-10) ─────────────────────────────────────────────
 
-def crear_coleccion(db: Session, data: ColeccionCreate) -> Coleccion:
+def obtener_coleccion(db: Session, coleccion_id: uuid.UUID) -> Coleccion:
+    col = db.get(Coleccion, coleccion_id)
+    if not col:
+        raise NotFoundError("Categoría no encontrada")
+    return col
+
+
+def _to_coleccion_response(db: Session, col: Coleccion) -> ColeccionResponse:
+    total = db.query(func.count(Libro.id)).filter(Libro.coleccion_id == col.id).scalar() or 0
+    return ColeccionResponse(
+        id=col.id, nombre=col.nombre, descripcion=col.descripcion, total_libros=total,
+    )
+
+
+def crear_coleccion(db: Session, data: ColeccionCreate) -> ColeccionResponse:
     existe = db.query(Coleccion).filter(func.lower(Coleccion.nombre) == data.nombre.lower()).first()
     if existe:
-        raise ConflictError(f"Ya existe la colección '{data.nombre}'")
+        raise ConflictError(f"Ya existe la categoría '{data.nombre}'")
     col = Coleccion(nombre=data.nombre, descripcion=data.descripcion)
     db.add(col)
     db.commit()
     db.refresh(col)
-    return col
+    return _to_coleccion_response(db, col)
+
+
+def actualizar_coleccion(db: Session, coleccion_id: uuid.UUID, data: ColeccionUpdate) -> ColeccionResponse:
+    col = obtener_coleccion(db, coleccion_id)
+    cambios = data.model_dump(exclude_unset=True)
+    if "nombre" in cambios:
+        dup = (
+            db.query(Coleccion)
+            .filter(func.lower(Coleccion.nombre) == cambios["nombre"].lower(), Coleccion.id != coleccion_id)
+            .first()
+        )
+        if dup:
+            raise ConflictError(f"Ya existe la categoría '{cambios['nombre']}'")
+    desc = describir_cambios(diff_cambios(col, cambios))
+    for campo, valor in cambios.items():
+        setattr(col, campo, valor)
+    db.commit()
+    db.refresh(col)
+    return _stash_audit(_to_coleccion_response(db, col), desc)
+
+
+def eliminar_coleccion(db: Session, coleccion_id: uuid.UUID, mover_a: uuid.UUID | None = None) -> tuple[int, str | None]:
+    """RN-08 análogo: eliminar una categoría NUNCA borra libros; solo los reasigna.
+    - `mover_a=None`  → los libros quedan sin categoría (coleccion_id = null).
+    - `mover_a=<otra categoría>` → se mueven a esa categoría.
+    Devuelve (cantidad de libros afectados, nombre de la categoría destino o None).
+    Nota: el FK libros.coleccion_id es ondelete SET NULL, pero reasignamos explícito
+    para soportar el 'mover a otra' antes de borrar."""
+    col = obtener_coleccion(db, coleccion_id)
+    libros = db.query(Libro).filter(Libro.coleccion_id == col.id).all()
+    destino_nombre: str | None = None
+    if libros:
+        if mover_a is not None:
+            if mover_a == col.id:
+                raise ConflictError("No podés mover los libros a la misma categoría que vas a eliminar.")
+            destino = db.get(Coleccion, mover_a)
+            if not destino:
+                raise NotFoundError("La categoría destino no existe")
+            destino_nombre = destino.nombre
+            for lb in libros:
+                lb.coleccion_id = destino.id
+        else:
+            for lb in libros:
+                lb.coleccion_id = None
+        db.flush()
+    db.delete(col)
+    db.commit()
+    return len(libros), destino_nombre
 
 
 # ─── Escritura: Campos personalizados (dinámicos) de libros ───────────────────

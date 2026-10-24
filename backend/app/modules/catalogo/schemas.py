@@ -12,6 +12,8 @@ class ColeccionResponse(BaseModel):
     id: uuid.UUID
     nombre: str
     descripcion: str | None
+    # Denormalizado para la UI (cantidad de libros en esta categoría).
+    total_libros: int = 0
 
 
 def _textura_valida(v: str | None) -> str | None:
@@ -96,14 +98,28 @@ class EstanteResponse(BaseModel):
     alto: float
     rotacion: float = 0
     color: str | None = None
+    coleccion_id: uuid.UUID | None = None
     # Denormalizado para la UI.
+    coleccion_nombre: str | None = None
     total_libros: int = 0
     niveles: list[NivelResponse] = []
+    # Ids de las fotos de referencia ordenadas. El binario se pide aparte a
+    # GET /catalogo/estante-fotos/{id}.
+    fotos: list[uuid.UUID] = []
 
 
 class LibroImagenResponse(BaseModel):
     """Metadatos de una imagen de libro (sin el binario). El binario se pide
     aparte a GET /catalogo/imagenes/{id}."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    orden: int
+    content_type: str
+
+
+class EstanteImagenResponse(BaseModel):
+    """Metadatos de una foto de estante (sin el binario). El binario se pide
+    aparte a GET /catalogo/estante-fotos/{id}."""
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     orden: int
@@ -118,6 +134,7 @@ class LibroResponse(BaseModel):
     autor: str
     editorial: str
     precio: Decimal | None
+    sinopsis: str | None = None
     coleccion_id: uuid.UUID | None
     estante_id: uuid.UUID | None
     nivel_id: uuid.UUID | None = None
@@ -148,6 +165,7 @@ class LibroCreate(BaseModel):
     editorial: str
     isbn: str | None = None
     precio: Decimal | None = None
+    sinopsis: str | None = None
     coleccion_id: uuid.UUID | None = None
     estante_id: uuid.UUID | None = None  # None = 'Sin ubicar' (RN-07)
     nivel_id: uuid.UUID | None = None
@@ -163,7 +181,7 @@ class LibroCreate(BaseModel):
             raise ValueError("Campo obligatorio")
         return v
 
-    @field_validator("isbn")
+    @field_validator("isbn", "sinopsis")
     @classmethod
     def _isbn_norm(cls, v: str | None) -> str | None:
         return _limpiar(v)
@@ -176,6 +194,7 @@ class LibroUpdate(BaseModel):
     editorial: str | None = None
     isbn: str | None = None
     precio: Decimal | None = None
+    sinopsis: str | None = None
     coleccion_id: uuid.UUID | None = None
     estante_id: uuid.UUID | None = None
     nivel_id: uuid.UUID | None = None
@@ -190,6 +209,11 @@ class LibroUpdate(BaseModel):
         if not v:
             raise ValueError("No puede quedar vacío")
         return v
+
+    @field_validator("sinopsis")
+    @classmethod
+    def _sinopsis_norm(cls, v: str | None) -> str | None:
+        return _limpiar(v)
 
 
 class PrecioUpdate(BaseModel):
@@ -208,12 +232,35 @@ class LibrosOrdenUpdate(BaseModel):
     libros: list[LibroOrdenItem]
 
 
+# ─── Borrado en lote (selección múltiple) ─────────────────────────────────────
+
+class IdsRequest(BaseModel):
+    ids: list[uuid.UUID]
+
+
+# ─── Acciones en lote sobre la selección: categorizar y ubicar ────────────────
+
+class CategoriaLoteRequest(BaseModel):
+    """Asignar (o quitar, con coleccion_id=None) la categoría a varios libros."""
+    ids: list[uuid.UUID]
+    coleccion_id: uuid.UUID | None = None
+
+
+class UbicarLoteRequest(BaseModel):
+    """Ubicar varios libros en un estante (y opcionalmente un nivel) de una.
+    estante_id=None los deja 'Sin ubicar' (RN-07)."""
+    ids: list[uuid.UUID]
+    estante_id: uuid.UUID | None = None
+    nivel_id: uuid.UUID | None = None
+
+
 # ─── Escritura: Estante (RF-02) ───────────────────────────────────────────────
 
 class EstanteCreate(BaseModel):
     codigo: str
     etiqueta: str | None = None
     zona_id: uuid.UUID | None = None
+    coleccion_id: uuid.UUID | None = None  # categoría del estante (RN-10)
     pos_x: float = 0
     pos_y: float = 0
     ancho: float = 12
@@ -241,6 +288,7 @@ class EstanteUpdate(BaseModel):
     codigo: str | None = None
     etiqueta: str | None = None
     zona_id: uuid.UUID | None = None
+    coleccion_id: uuid.UUID | None = None  # categoría del estante (RN-10)
     pos_x: float | None = None
     pos_y: float | None = None
     ancho: float | None = None
@@ -368,6 +416,31 @@ class ColeccionCreate(BaseModel):
         if not v:
             raise ValueError("El nombre es obligatorio")
         return v
+
+    @field_validator("descripcion")
+    @classmethod
+    def _desc_norm(cls, v: str | None) -> str | None:
+        return _limpiar(v)
+
+
+class ColeccionUpdate(BaseModel):
+    nombre: str | None = None
+    descripcion: str | None = None
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre_norm(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("El nombre no puede quedar vacío")
+        return v
+
+    @field_validator("descripcion")
+    @classmethod
+    def _desc_norm(cls, v: str | None) -> str | None:
+        return _limpiar(v)
 
 
 # ─── Campos personalizados (dinámicos) de libros ──────────────────────────────

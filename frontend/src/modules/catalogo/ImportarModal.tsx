@@ -1,13 +1,18 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, FileSpreadsheet, CheckCircle2, Loader2, AlertTriangle } from "lucide-react";
-import { Card } from "@/shared/components/ui/Card";
+import { Upload, FileSpreadsheet, CheckCircle2, Loader2, AlertTriangle, Download } from "lucide-react";
+import { Modal } from "@/shared/components/ui/Modal";
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import type { ImportResultado } from "@/shared/types";
-import { importarLibros } from "./api";
+import { importarLibros, descargarPlantilla } from "./api";
 
-export function ImportarPage() {
+interface Props {
+  abierto: boolean;
+  onClose: () => void;
+}
+
+export function ImportarModal({ abierto, onClose }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -15,6 +20,7 @@ export function ImportarPage() {
   const [preview, setPreview] = useState<ImportResultado | null>(null);
   const [confirmado, setConfirmado] = useState<ImportResultado | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [descargando, setDescargando] = useState<"csv" | "xlsx" | null>(null);
 
   const importar = useMutation({
     mutationFn: ({ file, dryRun }: { file: File; dryRun: boolean }) => importarLibros(file, dryRun),
@@ -50,49 +56,78 @@ export function ImportarPage() {
     toast.success(`Importación completada · ${res.creados} creados, ${res.actualizados} actualizados`);
   }
 
+  async function bajarPlantilla(formato: "csv" | "xlsx") {
+    try {
+      setDescargando(formato);
+      await descargarPlantilla(formato);
+    } catch {
+      toast.error("No se pudo descargar la plantilla");
+    } finally {
+      setDescargando(null);
+    }
+  }
+
   return (
-    <div className="max-w-2xl">
-      <header className="mb-6">
-        <h1 className="font-serif text-2xl font-bold text-stone-900">Importar inventario</h1>
-        <p className="text-sm text-stone-500">
-          Cargá el catálogo desde un archivo <strong>.csv</strong> o <strong>.xlsx</strong> (RF-05).
-          Se detectan las columnas automáticamente; los libros sin ubicación quedan como “Sin ubicar”.
+    <Modal abierto={abierto} onClose={onClose} titulo="Importar inventario" ancho="max-w-2xl">
+      <p className="mb-4 text-sm text-stone-500">
+        Cargá el catálogo desde un archivo <strong>.csv</strong> o <strong>.xlsx</strong> (RF-05).
+        Se detectan las columnas automáticamente; el <strong>ISBN es obligatorio</strong> y los
+        libros sin ubicación quedan como “Sin ubicar”.
+      </p>
+
+      {/* Plantilla ("bandeja") a completar */}
+      <div className="mb-4 rounded-xl border border-stone-200 bg-stone-50/60 p-4">
+        <div className="flex items-center gap-2 text-stone-700">
+          <Download className="h-4 w-4" />
+          <h3 className="text-sm font-semibold">Descargá la plantilla y completala</h3>
+        </div>
+        <p className="mt-1 text-xs text-stone-500">
+          Trae las columnas que se importan (ISBN, Título, Autor, Editorial, Precio) más tus
+          campos personalizados. Completala y volvé a subirla acá.
         </p>
-      </header>
-
-      <Card>
-        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-10 text-center hover:border-unla">
-          <FileSpreadsheet className="h-8 w-8 text-slate-400" />
-          <span className="text-sm font-medium text-slate-700">
-            {archivo ? archivo.name : "Elegí un archivo .csv o .xlsx"}
-          </span>
-          <span className="text-xs text-slate-400">Click para seleccionar</span>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".csv,.xlsx,.xlsm"
-            className="hidden"
-            onChange={(e) => seleccionar(e.target.files?.[0] ?? null)}
-          />
-        </label>
-
-        <div className="mt-4 flex gap-2">
-          <Button onClick={previsualizar} disabled={!archivo || importar.isPending}>
-            {importar.isPending && importar.variables?.dryRun && <Loader2 className="h-4 w-4 animate-spin" />}
-            <Upload className="h-4 w-4" /> Previsualizar
+        <div className="mt-3 flex gap-2">
+          <Button variant="outline" onClick={() => bajarPlantilla("csv")} disabled={descargando !== null}>
+            {descargando === "csv" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Plantilla CSV
+          </Button>
+          <Button variant="outline" onClick={() => bajarPlantilla("xlsx")} disabled={descargando !== null}>
+            {descargando === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Plantilla Excel
           </Button>
         </div>
+      </div>
 
-        {error && (
-          <p className="mt-4 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4" /> {error}
-          </p>
-        )}
-      </Card>
+      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-10 text-center hover:border-unla">
+        <FileSpreadsheet className="h-8 w-8 text-slate-400" />
+        <span className="text-sm font-medium text-slate-700">
+          {archivo ? archivo.name : "Elegí un archivo .csv o .xlsx"}
+        </span>
+        <span className="text-xs text-slate-400">Click para seleccionar</span>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,.xlsx,.xlsm"
+          className="hidden"
+          onChange={(e) => seleccionar(e.target.files?.[0] ?? null)}
+        />
+      </label>
+
+      <div className="mt-4 flex gap-2">
+        <Button onClick={previsualizar} disabled={!archivo || importar.isPending}>
+          {importar.isPending && importar.variables?.dryRun && <Loader2 className="h-4 w-4 animate-spin" />}
+          <Upload className="h-4 w-4" /> Previsualizar
+        </Button>
+      </div>
+
+      {error && (
+        <p className="mt-4 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          <AlertTriangle className="h-4 w-4" /> {error}
+        </p>
+      )}
 
       {/* Preview (dry-run): reporte + confirmación (CU-04) */}
       {preview && (
-        <Card className="mt-4">
+        <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4">
           <div className="mb-3 flex items-center gap-2 text-slate-700">
             <AlertTriangle className="h-5 w-5 text-amber-500" />
             <h2 className="font-semibold">Previsualización (aún no se guardó nada)</h2>
@@ -105,20 +140,20 @@ export function ImportarPage() {
               Confirmar importación
             </Button>
           </div>
-        </Card>
+        </div>
       )}
 
       {/* Resultado confirmado */}
       {confirmado && (
-        <Card className="mt-4">
+        <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4">
           <div className="mb-3 flex items-center gap-2 text-emerald-700">
             <CheckCircle2 className="h-5 w-5" />
             <h2 className="font-semibold">Importación completada</h2>
           </div>
           <Reporte res={confirmado} />
-        </Card>
+        </div>
       )}
-    </div>
+    </Modal>
   );
 }
 

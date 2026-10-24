@@ -4,9 +4,10 @@ import { Plus, Pencil, Trash2, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from "
 import { Button } from "@/shared/components/ui/Button";
 import { useToast } from "@/shared/components/ui/Toast";
 import { useConfirm } from "@/shared/components/ui/ConfirmDialog";
+import { useAuth } from "@/modules/auth/AuthContext";
 import { cn } from "@/lib/utils";
 import type { Estante } from "@/shared/types";
-import { listarEstantes, listarZonas, eliminarEstante } from "./api";
+import { listarEstantes, listarZonas, eliminarEstante, eliminarEstantesLote } from "./api";
 import { EstanteFormModal } from "./EstanteFormModal";
 import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 
@@ -18,6 +19,8 @@ export function EstantesPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirmar = useConfirm();
+  const { tienePermiso } = useAuth();
+  const puedeEliminar = tienePermiso("eliminar.ejecutar");
   const { data: estantes, isLoading } = useQuery({ queryKey: ["estantes"], queryFn: listarEstantes });
   const { data: zonas = [] } = useQuery({ queryKey: ["zonas"], queryFn: listarZonas });
 
@@ -26,6 +29,8 @@ export function EstantesPage() {
   const [orden, setOrden] = useState<Orden | null>(null);
   const [pagina, setPagina] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  // Selección múltiple para borrado en lote (ids de estantes).
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
 
   const eliminar = useMutation({
     mutationFn: eliminarEstante,
@@ -38,6 +43,45 @@ export function EstantesPage() {
       toast.error(err?.response?.data?.detail ?? "No se pudo eliminar el estante");
     },
   });
+
+  const eliminarLote = useMutation({
+    mutationFn: () => eliminarEstantesLote([...seleccion]),
+    onSuccess: ({ eliminados, desubicados }) => {
+      qc.invalidateQueries({ queryKey: ["estantes"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["libros"] });
+      setSeleccion(new Set());
+      toast.success(`${eliminados} estante(s) eliminado(s) · ${desubicados} libro(s) sin ubicar`);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail ?? "No se pudieron eliminar los estantes"),
+  });
+
+  const toggleSel = (id: string) =>
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  async function confirmarEliminarLote() {
+    const seleccionados = (estantes ?? []).filter((e) => seleccion.has(e.id));
+    const desubicados = seleccionados.reduce((acc, e) => acc + e.total_libros, 0);
+    const ok = await confirmar({
+      tono: "danger",
+      titulo: "Eliminar seleccionados",
+      confirmar: `Eliminar ${seleccionados.length}`,
+      mensaje: (
+        <>
+          ¿Eliminar <strong className="font-semibold text-stone-800">{seleccionados.length}</strong> estante(s)?
+          {desubicados > 0 && (
+            <> <strong>{desubicados}</strong> libro(s) de esos estantes quedarán <strong>"Sin ubicar"</strong>.</>
+          )}{" "}
+          Esta acción no se puede deshacer.
+        </>
+      ),
+    });
+    if (ok) eliminarLote.mutate();
+  }
 
   const nombreZona = (id: string | null) => zonas.find((z) => z.id === id)?.nombre ?? "—";
 
@@ -76,6 +120,16 @@ export function EstantesPage() {
     () => estantesOrdenados.slice((paginaActual - 1) * pageSize, paginaActual * pageSize),
     [estantesOrdenados, paginaActual, pageSize],
   );
+
+  const todosVisiblesSel = visibles.length > 0 && visibles.every((e) => seleccion.has(e.id));
+  function toggleTodosVisibles() {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      if (todosVisiblesSel) visibles.forEach((e) => next.delete(e.id));
+      else visibles.forEach((e) => next.add(e.id));
+      return next;
+    });
+  }
 
   function ordenarPor(campo: CampoOrden) {
     setOrden((prev) => {
@@ -138,15 +192,34 @@ export function EstantesPage() {
           <h1 className="font-serif text-2xl font-bold text-stone-900">Estantes</h1>
           <p className="text-sm text-stone-500">Secciones físicas del local (RF-02).</p>
         </div>
-        <Button onClick={() => { setEdit(null); setModal(true); }}>
-          <Plus className="h-4 w-4" /> Nuevo estante
-        </Button>
+        <div className="flex items-center gap-2">
+          {puedeEliminar && seleccion.size > 0 && (
+            <Button variant="danger" onClick={confirmarEliminarLote} disabled={eliminarLote.isPending}>
+              {eliminarLote.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Eliminar seleccionados ({seleccion.size})
+            </Button>
+          )}
+          <Button onClick={() => { setEdit(null); setModal(true); }}>
+            <Plus className="h-4 w-4" /> Nuevo estante
+          </Button>
+        </div>
       </header>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
+              {puedeEliminar && (
+                <th className="w-10 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={todosVisiblesSel}
+                    onChange={toggleTodosVisibles}
+                    aria-label="Seleccionar todos"
+                    className="h-4 w-4 rounded border-stone-300 text-unla focus:ring-unla/40"
+                  />
+                </th>
+              )}
               <EncabezadoOrden campo="codigo">Código</EncabezadoOrden>
               <EncabezadoOrden campo="etiqueta">Etiqueta</EncabezadoOrden>
               <EncabezadoOrden campo="zona">Zona</EncabezadoOrden>
@@ -157,12 +230,23 @@ export function EstantesPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+              <tr><td colSpan={puedeEliminar ? 7 : 6} className="px-4 py-8 text-center text-slate-400">
                 <Loader2 className="mx-auto h-5 w-5 animate-spin" />
               </td></tr>
             )}
             {visibles.map((e) => (
-              <tr key={e.id} className="hover:bg-slate-50">
+              <tr key={e.id} className={cn("hover:bg-slate-50", seleccion.has(e.id) && "bg-unla/5")}>
+                {puedeEliminar && (
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={seleccion.has(e.id)}
+                      onChange={() => toggleSel(e.id)}
+                      aria-label={`Seleccionar ${e.codigo}`}
+                      className="h-4 w-4 rounded border-stone-300 text-unla focus:ring-unla/40"
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-unla/10 px-2 py-0.5 text-xs font-medium text-unla">{e.codigo}</span>
                 </td>
