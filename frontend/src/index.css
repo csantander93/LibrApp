@@ -65,11 +65,11 @@ body {
 
 /* Piso del plano (estilo arquitectónico cálido, grilla fina). */
 .map-floor {
-  background-color: #ede9e0;
+  background-color: #f0e5cf;
   background-image:
-    linear-gradient(rgba(161, 148, 131, 0.18) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(161, 148, 131, 0.18) 1px, transparent 1px);
-  background-size: 32px 32px;
+    linear-gradient(rgba(150, 128, 96, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(150, 128, 96, 0.16) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 
 /* Texturas de piso alternativas por zona (se aplican sobre .map-floor). */

@@ -1,8 +1,9 @@
 import { useRef, type PointerEvent } from "react";
 import { Pencil, Plus, RotateCw, Maximize2, Minimize2 } from "lucide-react";
-import { cn, colorEstante, oscurecer } from "@/lib/utils";
+import { cn, colorEstante } from "@/lib/utils";
 import type { Estante, Anotacion, TexturaPiso } from "@/shared/types";
-import { renderElemento, claseTextura } from "./elementos";
+import { renderElemento, claseTextura, EstanteElement } from "./elementos";
+import { PlanoDefs, MarcoPlano } from "./SvgPlano";
 
 interface Props {
   estantes: Estante[];
@@ -193,7 +194,9 @@ export function MapaCanvas({
     <div className="relative h-full w-full" onDoubleClick={onExpandir}>
       <div className="h-full w-full overflow-hidden rounded-2xl border border-stone-300/80 shadow-inner shadow-stone-900/10">
         <div ref={canvasRef} className={cn("map-floor relative h-full w-full", claseTextura(textura))}>
-          <div className="pointer-events-none absolute inset-2 z-0 rounded border-[2.5px] border-stone-400/70" />
+          {/* Filtros/patrones compartidos del plano + muros perimetrales con grosor. */}
+          <PlanoDefs />
+          <MarcoPlano />
 
           {estantes.length === 0 && anotaciones.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-stone-400">
@@ -237,7 +240,6 @@ export function MapaCanvas({
             const seleccionado = seleccionadoId === est.id;
             const nuevo = nuevos?.has(est.id);
             const color = colorEstante(est.color, est.zona_id);
-            const borde = oscurecer(color, 0.78);
             return (
               <button
                 key={est.id}
@@ -246,7 +248,7 @@ export function MapaCanvas({
                 onPointerUp={onUp}
                 onClick={() => onSeleccionar?.(est)}
                 className={cn(
-                  "group absolute flex items-center justify-center rounded-md p-1 text-center transition-shadow duration-200",
+                  "group absolute flex items-center justify-center rounded-[5px] text-center transition-shadow duration-200",
                   modo === "editar" ? "cursor-move touch-none" : "cursor-pointer",
                   // Los nuevos (sin guardar) quedan por encima del resto.
                   nuevo ? "z-[8]" : "z-[5] hover:z-[6]",
@@ -255,25 +257,28 @@ export function MapaCanvas({
                   left: `${est.pos_x}%`, top: `${est.pos_y}%`,
                   width: `${est.ancho}%`, height: `${est.alto}%`,
                   transform: `rotate(${est.rotacion ?? 0}deg)`,
-                  background: color,
-                  border: `2px solid ${borde}`,
                   boxShadow: nuevo
                     ? "0 0 0 3px #F9F8F6, 0 0 0 6px #34D399, 0 0 26px 8px rgba(16,185,129,0.65)"
                     : resaltado
                     ? "0 0 0 3px #F9F8F6, 0 0 0 6px #E69D45, 0 0 22px 4px rgba(230,157,69,0.6)"
                     : seleccionado
                     ? "0 0 0 3px #F9F8F6, 0 0 0 6px #E69D45, 0 4px 12px rgba(0,0,0,0.2)"
-                    : "0 1px 4px rgba(0,0,0,0.18)",
+                    : "none",
                 }}
                 title={est.etiqueta ?? est.codigo}
               >
+                {/* Dibujo del estante (marco, libros, divisiones, sombra y badge con el código). */}
+                <EstanteElement
+                  codigo={est.codigo}
+                  color={color}
+                  rotacion={est.rotacion ?? 0}
+                  seleccionado={seleccionado}
+                  resaltado={resaltado}
+                />
                 {/* Destello pulsante mientras el estante es nuevo (sin guardar). */}
                 {nuevo && (
                   <span className="pointer-events-none absolute -inset-1 rounded-lg ring-2 ring-emerald-400/90 animate-pulse" />
                 )}
-                <span className="pointer-events-none max-w-full truncate rounded bg-black/25 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
-                  {est.codigo}
-                </span>
                 {modo === "editar" && seleccionado && (
                   <>
                     {handle(est, "shelf")}
