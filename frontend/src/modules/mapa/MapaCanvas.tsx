@@ -214,7 +214,10 @@ export function MapaCanvas({
                 onPointerUp={onUp}
                 onClick={() => onSeleccionarAnotacion?.(a)}
                 className={cn(
-                  "absolute z-[4] flex items-center justify-center",
+                  "absolute flex items-center justify-center",
+                  // El seleccionado sube por encima de todo (incluidos los estantes)
+                  // para poder verlo, tomarlo y reubicarlo; igual que un estante nuevo.
+                  sel ? "z-[8]" : "z-[4]",
                   modo === "editar" ? "cursor-move touch-none" : "pointer-events-none",
                 )}
                 style={{
@@ -250,8 +253,9 @@ export function MapaCanvas({
                 className={cn(
                   "group absolute flex items-center justify-center rounded-[5px] text-center transition-shadow duration-200",
                   modo === "editar" ? "cursor-move touch-none" : "cursor-pointer",
-                  // Los nuevos (sin guardar) quedan por encima del resto.
-                  nuevo ? "z-[8]" : "z-[5] hover:z-[6]",
+                  // Los nuevos (sin guardar) quedan por encima de todo; el seleccionado
+                  // también sube para poder tomarlo y reubicarlo sin que lo tape nada.
+                  nuevo ? "z-[9]" : seleccionado ? "z-[8]" : "z-[5] hover:z-[6]",
                 )}
                 style={{
                   left: `${est.pos_x}%`, top: `${est.pos_y}%`,

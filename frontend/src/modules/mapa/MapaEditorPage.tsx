@@ -245,10 +245,14 @@ export function MapaEditorPage() {
   const agregarAnot = useMutation({
     mutationFn: (tipo: AnotacionTipo) => {
       const d = defaultsElemento(tipo);
+      // Aparece CENTRADO en el mapa según su tamaño (como un estante nuevo).
+      const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max);
       return crearAnotacion({
         tipo, zona_id: zonaId || null,
         texto: d.texto,
-        pos_x: 42, pos_y: 44, ancho: d.ancho, alto: d.alto,
+        pos_x: clamp(50 - d.ancho / 2, 100 - d.ancho),
+        pos_y: clamp(50 - d.alto / 2, 100 - d.alto),
+        ancho: d.ancho, alto: d.alto,
         color: d.color,
       });
     },
