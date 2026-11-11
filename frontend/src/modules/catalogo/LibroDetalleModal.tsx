@@ -79,9 +79,10 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
             <span className="font-serif text-base font-semibold text-slate-900">{libro.titulo}</span>
           </Campo>
         </div>
+        <Campo etiqueta="Código"><span className="font-mono">{libro.codigo}</span></Campo>
+        <Campo etiqueta="ISBN">{libro.isbn ?? "—"}</Campo>
         <Campo etiqueta="Autor">{libro.autor}</Campo>
         <Campo etiqueta="Editorial">{libro.editorial}</Campo>
-        <Campo etiqueta="ISBN">{libro.isbn ?? "—"}</Campo>
         <Campo etiqueta="Colección">{libro.coleccion_nombre ?? "—"}</Campo>
         <Campo etiqueta="Ubicación">{ubicacion}</Campo>
         <Campo etiqueta="Precio">

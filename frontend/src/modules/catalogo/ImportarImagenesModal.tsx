@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, ImagePlus, CheckCircle2, Loader2, AlertTriangle } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
@@ -17,12 +17,20 @@ export function ImportarImagenesModal({ abierto, onClose }: Props) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [archivos, setArchivos] = useState<File[]>([]);
+  const [pisarAmbiguos, setPisarAmbiguos] = useState(false);
   const [preview, setPreview] = useState<ImportImagenesResultado | null>(null);
   const [confirmado, setConfirmado] = useState<ImportImagenesResultado | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Timer para autocerrar el modal tras una importación exitosa y sin pendientes.
+  const cierreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const limpiarTimer = () => {
+    if (cierreTimer.current) { clearTimeout(cierreTimer.current); cierreTimer.current = null; }
+  };
+  useEffect(() => limpiarTimer, []);
 
   const importar = useMutation({
-    mutationFn: ({ files, dryRun }: { files: File[]; dryRun: boolean }) => importarPortadas(files, dryRun),
+    mutationFn: ({ files, dryRun }: { files: File[]; dryRun: boolean }) =>
+      importarPortadas(files, dryRun, pisarAmbiguos),
     onError: (err: any) => {
       const detail = err?.response?.data?.detail;
       setError(typeof detail === "string" ? detail : "No se pudieron procesar las imágenes");
@@ -53,9 +61,17 @@ export function ImportarImagenesModal({ abierto, onClose }: Props) {
     toast.success(
       `Portadas importadas · ${res.asignadas} nuevas, ${res.reemplazadas} reemplazadas`,
     );
+    // Si todo salió bien (nada sin coincidencia / ambiguo / con error), mostramos el
+    // cartel de éxito un instante y cerramos solo. Si hay pendientes para corregir,
+    // dejamos el modal abierto con el reporte.
+    if (res.sin_match === 0 && res.ambiguos === 0 && res.errores === 0) {
+      limpiarTimer();
+      cierreTimer.current = setTimeout(cerrar, 1800);
+    }
   }
 
   function cerrar() {
+    limpiarTimer();
     seleccionar([]);
     if (inputRef.current) inputRef.current.value = "";
     onClose();
@@ -64,11 +80,12 @@ export function ImportarImagenesModal({ abierto, onClose }: Props) {
   return (
     <Modal abierto={abierto} onClose={cerrar} titulo="Importar portadas" ancho="max-w-2xl">
       <p className="mb-4 text-sm text-stone-500">
-        Cargá muchas portadas de una. <strong>Nombrá cada imagen con el ISBN del libro</strong>{" "}
-        (por ejemplo <code>9788437604947.jpg</code>); para los libros sin ISBN, usá su{" "}
-        <strong>identificador interno</strong>. La imagen se asigna como portada del libro que
-        matchea y <strong>reemplaza la portada</strong> si ya tenía una. Formatos: JPG, PNG, WEBP,
-        GIF o AVIF (hasta 5 MB c/u).
+        Cargá muchas portadas de una. <strong>Nombrá cada imagen con el ISBN</strong>{" "}
+        (ej. <code>9788437604947.jpg</code>), con el <strong>código del libro</strong>{" "}
+        (ej. <code>L-000123.jpg</code>) o directamente con el <strong>título</strong>{" "}
+        (ej. <code>El Aleph.jpg</code>). La imagen se asigna como portada del libro que matchea
+        y <strong>reemplaza la portada</strong> si ya tenía una. Formatos: JPG, PNG, WEBP, GIF o
+        AVIF (hasta 5 MB c/u).
       </p>
 
       <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-10 text-center hover:border-unla">
@@ -85,6 +102,20 @@ export function ImportarImagenesModal({ abierto, onClose }: Props) {
           className="hidden"
           onChange={(e) => seleccionar(Array.from(e.target.files ?? []))}
         />
+      </label>
+
+      <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-stone-600">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={pisarAmbiguos}
+          onChange={(e) => { setPisarAmbiguos(e.target.checked); setPreview(null); setConfirmado(null); }}
+        />
+        <span>
+          Cuando un archivo matchea por <strong>título</strong> a varios libros con el mismo
+          nombre, <strong>aplicar la portada a todos</strong>. Si está desactivado, esos archivos
+          se marcan como “ambiguos” y no se tocan.
+        </span>
       </label>
 
       <div className="mt-4 flex gap-2">
@@ -137,14 +168,17 @@ function Reporte({ res }: { res: ImportImagenesResultado }) {
     { label: "Archivos", valor: res.total_archivos, color: "text-slate-900" },
     { label: "Portadas nuevas", valor: res.asignadas, color: "text-emerald-600" },
     { label: "Reemplazadas", valor: res.reemplazadas, color: "text-blue-600" },
+    { label: "Ambiguas", valor: res.ambiguos, color: "text-amber-600" },
     { label: "Sin coincidencia", valor: res.sin_match, color: "text-amber-600" },
     { label: "Con error", valor: res.errores, color: "text-red-600" },
   ];
-  // Solo los archivos que NO se asignaron bien: lo que el usuario debe corregir.
-  const problemas = res.items.filter((i) => i.estado === "sin_match" || i.estado === "error");
+  // Archivos que NO se asignaron bien: lo que el usuario debe revisar/corregir.
+  const problemas = res.items.filter(
+    (i) => i.estado === "sin_match" || i.estado === "error" || i.estado === "ambiguo",
+  );
   return (
     <div>
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {stats.map((s) => (
           <div key={s.label} className="rounded-lg bg-slate-50 p-3 text-center">
             <p className={`text-xl font-bold ${s.color}`}>{s.valor}</p>

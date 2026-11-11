@@ -20,6 +20,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
+from app.modules.catalogo import service
 from app.modules.catalogo.models import Coleccion, Estante, Libro, CampoLibro
 from app.modules.catalogo.schemas import ImportResultado, ImportFilaError
 from app.modules.configuracion.service import obtener_configuracion
@@ -292,6 +293,9 @@ def importar(db: Session, contenido: bytes, filename: str, dry_run: bool) -> Imp
                 datos_extra=extra,
             )
             if not dry_run:
+                # Código interno autogenerado (solo en import real, no en dry-run,
+                # para no consumir la secuencia en la previsualización).
+                nuevo.codigo = service.generar_codigo_libro(db)
                 db.add(nuevo)
             # Registrar en los índices para no duplicar dentro del mismo archivo.
             if isbn:

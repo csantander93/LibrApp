@@ -181,6 +181,11 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     """
     __tablename__ = "libros"
 
+    # Código interno único y legible, autogenerado al dar de alta (formato "L-000123").
+    # A diferencia del ISBN (opcional, editorial), SIEMPRE existe y es fijo: sirve como
+    # identificador estable del ejemplar y como clave para nombrar archivos en la carga
+    # masiva de portadas (ver service.generar_codigo_libro / importar_portadas).
+    codigo: Mapped[str] = mapped_column(String(12), unique=True, nullable=False, index=True)
     isbn: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True, index=True)
     titulo: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     autor: Mapped[str] = mapped_column(String(255), nullable=False)

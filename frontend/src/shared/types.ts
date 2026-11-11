@@ -58,6 +58,8 @@ export interface DashboardStats {
 
 export interface Libro {
   id: string;
+  /** Código interno único y legible (autogenerado, de solo lectura): "L-000123". */
+  codigo: string;
   isbn: string | null;
   titulo: string;
   autor: string;
@@ -213,7 +215,7 @@ export interface ImportResultado {
 /** Resultado por archivo de la carga masiva de portadas. */
 export interface ImportImagenItem {
   archivo: string;
-  estado: "asignada" | "reemplazada" | "sin_match" | "error";
+  estado: "asignada" | "reemplazada" | "ambiguo" | "sin_match" | "error";
   libro_titulo: string | null;
   motivo: string | null;
 }
@@ -224,6 +226,8 @@ export interface ImportImagenesResultado {
   asignadas: number;
   reemplazadas: number;
   sin_match: number;
+  /** Match por título con varios libros, sin confirmar "aplicar a todos". */
+  ambiguos: number;
   errores: number;
   items: ImportImagenItem[];
 }

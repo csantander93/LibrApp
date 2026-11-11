@@ -18,7 +18,7 @@ import { ImportarImagenesModal } from "./ImportarImagenesModal";
 import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 
 /** Columnas ordenables del catálogo. */
-type CampoOrden = "titulo" | "autor" | "editorial" | "coleccion_nombre" | "estante_codigo" | "precio";
+type CampoOrden = "codigo" | "titulo" | "autor" | "editorial" | "coleccion_nombre" | "estante_codigo" | "precio";
 type Orden = { campo: CampoOrden; dir: "asc" | "desc" };
 type Vista = "lista" | "detalles" | "cuadricula";
 
@@ -365,7 +365,7 @@ export function CatalogoPage() {
           <Input
             value={q}
             onChange={(e) => { setQ(e.target.value); setPagina(1); }}
-            placeholder="Buscar por título, autor o ISBN…"
+            placeholder="Buscar por código, título, autor o ISBN…"
             className="pl-9"
           />
         </div>
@@ -545,6 +545,7 @@ export function CatalogoPage() {
                     />
                   </th>
                 )}
+                <EncabezadoOrden campo="codigo">Código</EncabezadoOrden>
                 <EncabezadoOrden campo="titulo">Título</EncabezadoOrden>
                 <EncabezadoOrden campo="autor">Autor</EncabezadoOrden>
                 <EncabezadoOrden campo="editorial">Editorial</EncabezadoOrden>
@@ -572,6 +573,7 @@ export function CatalogoPage() {
                       />
                     </td>
                   )}
+                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{libro.codigo}</td>
                   <td className="px-4 py-3 font-medium text-slate-900">{libro.titulo}</td>
                   <td className="px-4 py-3 text-slate-600">{libro.autor}</td>
                   <td className="px-4 py-3 text-slate-600">{libro.editorial}</td>

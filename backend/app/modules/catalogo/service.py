@@ -4,7 +4,7 @@ import uuid
 import unicodedata
 from datetime import date
 from PIL import Image, ImageOps
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.modules.catalogo.models import (
@@ -117,7 +117,7 @@ def listar_estantes(db: Session) -> list[EstanteResponse]:
 
 def _to_libro_response(lb: Libro) -> LibroResponse:
     return LibroResponse(
-        id=lb.id, isbn=lb.isbn, titulo=lb.titulo, autor=lb.autor,
+        id=lb.id, codigo=lb.codigo, isbn=lb.isbn, titulo=lb.titulo, autor=lb.autor,
         editorial=lb.editorial, precio=lb.precio, sinopsis=lb.sinopsis,
         coleccion_id=lb.coleccion_id, estante_id=lb.estante_id, nivel_id=lb.nivel_id,
         orden=lb.orden,
@@ -151,7 +151,8 @@ def listar_libros(
     if q:
         like = f"%{q.strip()}%"
         query = query.filter(
-            Libro.titulo.ilike(like) | Libro.autor.ilike(like) | Libro.isbn.ilike(like)
+            Libro.titulo.ilike(like) | Libro.autor.ilike(like)
+            | Libro.isbn.ilike(like) | Libro.codigo.ilike(like)
         )
     if coleccion_id:
         query = query.filter(Libro.coleccion_id == coleccion_id)
@@ -297,6 +298,17 @@ def obtener_libro(db: Session, libro_id: uuid.UUID) -> Libro:
     return lb
 
 
+def generar_codigo_libro(db: Session) -> str:
+    """Devuelve el próximo código interno correlativo (formato 'L-000123').
+
+    Usa la secuencia Postgres `libro_codigo_seq` (creada en la migración
+    0012_libro_codigo), así es monotónica y segura aun creando muchos libros en
+    una misma transacción (importador). Se usa en TODAS las vías de alta: ABM,
+    importador masivo y seed."""
+    n = db.execute(text("SELECT nextval('libro_codigo_seq')")).scalar()
+    return f"L-{int(n):06d}"
+
+
 def crear_libro(db: Session, data: LibroCreate) -> LibroResponse:
     _validar_isbn_obligatorio(db, data.isbn)
     _validar_isbn_unico(db, data.isbn)
@@ -305,6 +317,7 @@ def crear_libro(db: Session, data: LibroCreate) -> LibroResponse:
     payload["nivel_id"] = _resolver_nivel(db, data.estante_id, data.nivel_id, nivel_explicito=True)
     payload["datos_extra"] = _validar_datos_extra(db, payload.get("datos_extra"))
     lb = Libro(**payload)
+    lb.codigo = generar_codigo_libro(db)
     db.add(lb)
     db.commit()
     db.refresh(lb)
@@ -530,12 +543,13 @@ def hacer_principal_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
 # ─── Importación masiva de portadas (RF-05 análogo) ───────────────────────────
 #
 # El bibliotecario sube muchas imágenes de una; cada archivo se matchea con un
-# libro por su NOMBRE: el nombre del archivo (sin extensión) debe ser el ISBN del
-# libro o, para los libros sin ISBN, su identificador interno (UUID). La imagen
-# matcheada pasa a ser la PORTADA (orden 0): si el libro ya tenía portada se le
-# reemplaza el contenido en su lugar (la galería no crece ni se desordena); si no
-# tenía imágenes, se crea la portada. Tiene modo dry_run (preview) como el
-# importador de libros.
+# libro por su NOMBRE (sin extensión), probando en orden: identificador interno
+# (UUID) → código 'L-...' → ISBN → TÍTULO. La imagen matcheada pasa a ser la
+# PORTADA (orden 0): si el libro ya tenía portada se le reemplaza el contenido en
+# su lugar (la galería no crece ni se desordena); si no, se crea. El match por
+# título puede dar VARIOS libros (mismo nombre, distinto ISBN): por defecto el
+# archivo queda 'ambiguo' y no se toca nada; con `pisar_ambiguos` se aplica a
+# todos. Tiene modo dry_run (preview) como el importador de libros.
 
 def _nombre_sin_extension(filename: str) -> str:
     """Devuelve el nombre del archivo sin ruta ni extensión, ya recortado."""
@@ -581,84 +595,134 @@ def _set_portada(db: Session, libro_id: uuid.UUID, contenido_webp: bytes) -> str
     return "asignada"
 
 
+def _norm_titulo(valor: str) -> str:
+    """Normaliza un título para matchearlo con el nombre de un archivo: minúsculas,
+    sin acentos y con espacios colapsados."""
+    s = unicodedata.normalize("NFKD", valor or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return " ".join(s.lower().split())
+
+
 def importar_portadas(
     db: Session, archivos: list[tuple[str, str, bytes]], dry_run: bool,
+    pisar_ambiguos: bool = False,
 ) -> ImportImagenesResultado:
     """Carga masiva de portadas. `archivos` es [(nombre, content_type, bytes)].
-    Matchea cada archivo con un libro por ISBN o por UUID según su nombre y, si
-    no es dry_run, guarda la imagen como portada (ver `_set_portada`)."""
+    Matchea cada archivo con un libro por su nombre (sin extensión) en este orden:
+    identificador interno (UUID) → código 'L-...' → ISBN → TÍTULO, y guarda la
+    imagen como portada (ver `_set_portada`); con dry_run no persiste.
+
+    Si el match es por TÍTULO y hay varios libros con ese título, por defecto el
+    archivo queda 'ambiguo' (no se toca nada); con `pisar_ambiguos=True` se aplica
+    la misma portada a TODOS esos libros."""
     libros = db.query(Libro).all()
     por_isbn: dict[str, Libro] = {}
+    por_codigo: dict[str, Libro] = {}
+    por_titulo: dict[str, list[Libro]] = {}
     for lb in libros:
         if lb.isbn:
             clave = _norm_isbn(lb.isbn)
             if clave:
                 por_isbn.setdefault(clave, lb)
+        por_codigo[lb.codigo.lower()] = lb
+        por_titulo.setdefault(_norm_titulo(lb.titulo), []).append(lb)
     por_id = {str(lb.id): lb for lb in libros}
 
+    def _resolver(nombre: str) -> list[Libro]:
+        clave = nombre.lower()
+        if clave in por_id:
+            return [por_id[clave]]
+        if clave in por_codigo:            # código 'L-...' antes que ISBN (evita colisiones)
+            return [por_codigo[clave]]
+        isbn = _norm_isbn(nombre)
+        if isbn and isbn in por_isbn:
+            return [por_isbn[isbn]]
+        return por_titulo.get(_norm_titulo(nombre), [])
+
     items: list[ImportImagenItem] = []
-    asignadas = reemplazadas = sin_match = errores = 0
+    asignadas = reemplazadas = sin_match = ambiguos = errores = 0
     # Un mismo libro no puede recibir dos archivos en la misma corrida.
     vistos: set[uuid.UUID] = set()
 
     for filename, content_type, contenido in archivos:
         nombre = _nombre_sin_extension(filename)
-        libro = por_id.get(nombre.lower())
-        if libro is None:
-            clave_isbn = _norm_isbn(nombre)
-            if clave_isbn:
-                libro = por_isbn.get(clave_isbn)
-        if libro is None:
+        matches = _resolver(nombre)
+        if not matches:
             sin_match += 1
             items.append(ImportImagenItem(
                 archivo=filename, estado="sin_match",
-                motivo="No se encontró un libro con ese ISBN o código",
+                motivo="No se encontró un libro con ese ISBN, código o título",
             ))
             continue
 
+        # Imagen inválida: se reporta una sola vez por archivo.
         motivo = _motivo_imagen_invalida(content_type, contenido)
-        if motivo is None and libro.id in vistos:
-            motivo = "Hay más de un archivo para este mismo libro en la selección"
         if motivo is not None:
             errores += 1
             items.append(ImportImagenItem(
-                archivo=filename, estado="error", libro_titulo=libro.titulo, motivo=motivo,
+                archivo=filename, estado="error",
+                libro_titulo=matches[0].titulo if len(matches) == 1 else None, motivo=motivo,
             ))
             continue
 
-        vistos.add(libro.id)
-        if dry_run:
-            ya_tiene = (
-                db.query(LibroImagen.id)
-                .filter(LibroImagen.libro_id == libro.id, LibroImagen.orden == 0)
-                .first()
-                is not None
-            )
-            estado = "reemplazada" if ya_tiene else "asignada"
-        else:
+        # Título ambiguo (varios libros con el mismo nombre) sin confirmar: no se toca.
+        if len(matches) > 1 and not pisar_ambiguos:
+            ambiguos += 1
+            items.append(ImportImagenItem(
+                archivo=filename, estado="ambiguo", libro_titulo=matches[0].titulo,
+                motivo=(f"{len(matches)} libros tienen ese título; activá “aplicar a todos” "
+                        "o renombrá el archivo con el ISBN o el código del libro"),
+            ))
+            continue
+
+        # Convierte una sola vez; se reutiliza para todos los libros que matchean.
+        if not dry_run:
             try:
-                estado = _set_portada(db, libro.id, _a_webp(contenido))
+                webp = _a_webp(contenido)
             except ValidationError as exc:
                 errores += 1
                 items.append(ImportImagenItem(
-                    archivo=filename, estado="error", libro_titulo=libro.titulo, motivo=str(exc.detail),
+                    archivo=filename, estado="error",
+                    libro_titulo=matches[0].titulo if len(matches) == 1 else None, motivo=str(exc.detail),
                 ))
-                vistos.discard(libro.id)
                 continue
 
-        if estado == "reemplazada":
-            reemplazadas += 1
-        else:
-            asignadas += 1
-        items.append(ImportImagenItem(archivo=filename, estado=estado, libro_titulo=libro.titulo))
+        for libro in matches:
+            if libro.id in vistos:
+                errores += 1
+                items.append(ImportImagenItem(
+                    archivo=filename, estado="error", libro_titulo=libro.titulo,
+                    motivo="Ya se asignó una portada a este libro en esta misma corrida",
+                ))
+                continue
+            vistos.add(libro.id)
+            if dry_run:
+                ya_tiene = (
+                    db.query(LibroImagen.id)
+                    .filter(LibroImagen.libro_id == libro.id, LibroImagen.orden == 0)
+                    .first()
+                    is not None
+                )
+                estado = "reemplazada" if ya_tiene else "asignada"
+            else:
+                estado = _set_portada(db, libro.id, webp)
+            if estado == "reemplazada":
+                reemplazadas += 1
+            else:
+                asignadas += 1
+            # Si el match fue por título ambiguo, aclaramos a qué libro se aplicó (código).
+            detalle = libro.codigo if len(matches) > 1 else None
+            items.append(ImportImagenItem(
+                archivo=filename, estado=estado, libro_titulo=libro.titulo, motivo=detalle,
+            ))
 
     if not dry_run:
         db.commit()
 
     return ImportImagenesResultado(
         dry_run=dry_run, total_archivos=len(archivos),
-        asignadas=asignadas, reemplazadas=reemplazadas, sin_match=sin_match, errores=errores,
-        items=items,
+        asignadas=asignadas, reemplazadas=reemplazadas, sin_match=sin_match,
+        ambiguos=ambiguos, errores=errores, items=items,
     )
 
 

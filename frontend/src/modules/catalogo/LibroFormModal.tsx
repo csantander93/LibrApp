@@ -149,6 +149,16 @@ export function LibroFormModal({ abierto, onClose, libro, colecciones, estantes 
             />
           </Campo>
         </div>
+        {libro && (
+          <Campo label="Código (interno, autogenerado)">
+            <Input
+              value={libro.codigo}
+              readOnly
+              disabled
+              className="bg-stone-50 font-mono text-stone-500"
+            />
+          </Campo>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Campo label="Categoría">
             <Select value={form.coleccion_id ?? ""} onChange={(e) => set("coleccion_id")(e.target.value)}>

@@ -129,6 +129,8 @@ class EstanteImagenResponse(BaseModel):
 class LibroResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    # Código interno único y legible (autogenerado, de solo lectura): "L-000123".
+    codigo: str
     isbn: str | None
     titulo: str
     autor: str
@@ -565,7 +567,7 @@ class ImportResultado(BaseModel):
 class ImportImagenItem(BaseModel):
     """Resultado por archivo de la carga masiva de portadas."""
     archivo: str
-    estado: str  # asignada | reemplazada | sin_match | error
+    estado: str  # asignada | reemplazada | ambiguo | sin_match | error
     libro_titulo: str | None = None
     motivo: str | None = None
 
@@ -575,6 +577,7 @@ class ImportImagenesResultado(BaseModel):
     total_archivos: int
     asignadas: int       # portadas nuevas (el libro no tenía imagen)
     reemplazadas: int    # se reemplazó la portada existente
-    sin_match: int       # ningún libro con ese ISBN/código
+    sin_match: int       # ningún libro con ese ISBN/código/título
+    ambiguos: int        # match por título con varios libros, sin confirmar "aplicar a todos"
     errores: int         # archivo no válido (formato/tamaño/duplicado)
     items: list[ImportImagenItem]

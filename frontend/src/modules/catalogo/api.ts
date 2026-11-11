@@ -390,14 +390,16 @@ export async function importarLibros(archivo: File, dryRun: boolean): Promise<Im
 }
 
 /** Carga masiva de portadas: cada imagen se matchea con un libro por su nombre
- * de archivo (ISBN o id del libro). dryRun=true devuelve el preview sin guardar. */
+ * de archivo (UUID, código 'L-...', ISBN o título). dryRun=true devuelve el preview
+ * sin guardar. pisarAmbiguos=true aplica la portada a todos los libros que comparten
+ * un mismo título. */
 export async function importarPortadas(
-  archivos: File[], dryRun: boolean,
+  archivos: File[], dryRun: boolean, pisarAmbiguos = false,
 ): Promise<ImportImagenesResultado> {
   const form = new FormData();
   archivos.forEach((f) => form.append("archivos", f));
   const { data } = await api.post<ImportImagenesResultado>(
-    `/catalogo/libros/importar-imagenes?dry_run=${dryRun}`,
+    `/catalogo/libros/importar-imagenes?dry_run=${dryRun}&pisar_ambiguos=${pisarAmbiguos}`,
     form,
   );
   return data;

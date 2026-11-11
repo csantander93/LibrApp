@@ -19,6 +19,7 @@ from app.core.security import hash_password
 from app.modules.auth.models import Usuario, Rol
 from app.modules.auth.permisos import WILDCARD
 from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel
+from app.modules.catalogo.service import generar_codigo_libro
 
 settings = get_settings()
 
@@ -160,6 +161,7 @@ def _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estant
     if db.query(Libro).filter(Libro.titulo == titulo, Libro.editorial == editorial).first():
         return False
     db.add(Libro(
+        codigo=generar_codigo_libro(db),
         isbn=isbn, titulo=titulo, autor=autor, editorial=editorial,
         precio=Decimal(str(precio)) if precio else None,
         coleccion_id=coleccion.id if coleccion else None,

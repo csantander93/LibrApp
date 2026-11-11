@@ -537,19 +537,23 @@ async def importar_libros(
 async def importar_portadas(
     archivos: list[UploadFile] = File(...),
     dry_run: bool = Query(True, description="True = solo previsualiza (no persiste)."),
+    pisar_ambiguos: bool = Query(
+        False,
+        description="True = si un archivo matchea por título a varios libros, les pisa la portada a todos.",
+    ),
     db: Session = Depends(get_db),
     audit: AuditContext = AUDIT_IMP,
 ):
     """Carga masiva de portadas: cada imagen se matchea con un libro por su nombre
-    de archivo (ISBN o id del libro) y pasa a ser la portada. Con dry_run=true
-    devuelve el reporte de lo que se haría sin guardar (preview)."""
+    de archivo (UUID, código 'L-...', ISBN o título) y pasa a ser la portada. Con
+    dry_run=true devuelve el reporte de lo que se haría sin guardar (preview)."""
     items = [(a.filename or "", a.content_type or "", await a.read()) for a in archivos]
-    resultado = service.importar_portadas(db, items, dry_run=dry_run)
+    resultado = service.importar_portadas(db, items, dry_run=dry_run, pisar_ambiguos=pisar_ambiguos)
     if not resultado.dry_run:
         audit.registrar_accion(
             f"Importó portadas: {resultado.asignadas} asignada(s), "
-            f"{resultado.reemplazadas} reemplazada(s), {resultado.sin_match} sin coincidencia, "
-            f"{resultado.errores} con error",
+            f"{resultado.reemplazadas} reemplazada(s), {resultado.ambiguos} ambigua(s), "
+            f"{resultado.sin_match} sin coincidencia, {resultado.errores} con error",
             modulo="Importación", accion="Importación",
         )
     return resultado
