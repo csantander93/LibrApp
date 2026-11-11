@@ -16,10 +16,23 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
 
-# postgresql-client: provee pg_dump para el respaldo de la base a Drive y la
-# descarga manual (modules/configuracion/backup.py). Dev ya lo trae en Dockerfile.dev.
+# pg_dump para el respaldo/descarga de la base (modules/configuracion/backup.py).
+# Instalamos el cliente desde el repo oficial PGDG y fijamos la MISMA major que el
+# servidor: pg_dump se niega a volcar una base de un servidor más nuevo que él
+# (Railway corre Postgres 18; el postgresql-client de Debian trae 17). Si Railway
+# sube de major en el futuro, actualizá PG_MAJOR acá.
+ENV PG_MAJOR=18
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client \
+      ca-certificates curl gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" \
+         > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-${PG_MAJOR} \
+    && apt-get purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./
