@@ -6,19 +6,24 @@ import { useToast } from "@/shared/components/ui/Toast";
 import { useAuth } from "@/modules/auth/AuthContext";
 import { UsuariosTab } from "@/modules/usuarios/UsuariosTab";
 import { RolesTab } from "@/modules/usuarios/RolesTab";
+import { RespaldosTab } from "./RespaldosTab";
 import { cn } from "@/lib/utils";
 import type { Configuracion } from "@/shared/types";
 import { obtenerConfiguracion, actualizarConfiguracion } from "./api";
 
-type Tab = "general" | "usuarios" | "roles";
+type Tab = "general" | "respaldos" | "usuarios" | "roles";
 
 export function ConfiguracionPage() {
   const { tienePermiso } = useAuth();
   const puedeGeneral = tienePermiso("configuracion.editar");
   const puedeUsuarios = tienePermiso("usuarios.gestionar");
 
-  // Pestaña inicial: la primera a la que el usuario tenga acceso.
-  const [tab, setTab] = useState<Tab>(puedeGeneral ? "general" : "usuarios");
+  // Pestaña inicial: si volvemos del OAuth de Drive (?drive=...), abrir Respaldos
+  // para que RespaldosTab muestre el aviso y refresque; si no, la primera accesible.
+  const vuelveDeDrive = puedeGeneral && new URLSearchParams(window.location.search).has("drive");
+  const [tab, setTab] = useState<Tab>(
+    vuelveDeDrive ? "respaldos" : puedeGeneral ? "general" : "usuarios",
+  );
 
   return (
     <div>
@@ -29,7 +34,10 @@ export function ConfiguracionPage() {
 
       <div className="mb-5 flex gap-1 border-b border-stone-200">
         {puedeGeneral && (
-          <TabButton activo={tab === "general"} onClick={() => setTab("general")}>General</TabButton>
+          <>
+            <TabButton activo={tab === "general"} onClick={() => setTab("general")}>General</TabButton>
+            <TabButton activo={tab === "respaldos"} onClick={() => setTab("respaldos")}>Respaldos</TabButton>
+          </>
         )}
         {puedeUsuarios && (
           <>
@@ -40,6 +48,7 @@ export function ConfiguracionPage() {
       </div>
 
       {tab === "general" && puedeGeneral && <GeneralTab />}
+      {tab === "respaldos" && puedeGeneral && <RespaldosTab />}
       {tab === "usuarios" && puedeUsuarios && <UsuariosTab />}
       {tab === "roles" && puedeUsuarios && <RolesTab />}
     </div>
@@ -130,7 +139,7 @@ function SettingRow({
   );
 }
 
-function Toggle({
+export function Toggle({
   checked,
   disabled,
   onChange,

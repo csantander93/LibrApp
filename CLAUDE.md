@@ -103,7 +103,7 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
 | `/admin/estantes` | ABM de estantes (RF-02) |
 | `/admin/mapa` | Editor de mapa 2D con drag & resize (RF-01/RF-10/RF-11) |
 | `/admin/registros` | Registros de auditoría (permiso `registros.ver`) |
-| `/admin/configuracion` | Ajustes + pestañas **Usuarios** y **Roles** (RF-08); las pestañas se muestran según permiso |
+| `/admin/configuracion` | Ajustes + pestañas **Respaldos**, **Usuarios** y **Roles** (RF-08); las pestañas se muestran según permiso |
 
 ## Reglas de negocio clave (implementadas — no romper)
 
@@ -149,6 +149,17 @@ pero **simplificadas**: sin multi-tenancy, sin Celery/Redis, sin mails.
   `catalogo`, se editan en el editor y se ven en público (solo lectura). Estantes y anotaciones se
   persisten con guardado **en lote** (`.../posiciones`); el alta/baja es inmediata pero se agrega
   a la copia local optimista para no perder cambios sin guardar.
+- **Respaldo a Google Drive** (`configuracion/backup.py` + `scheduler.py`): dump completo con
+  `pg_dump` → `.sql.gz` → subida *resumable* a la carpeta "LibrApp Backups". **Las imágenes están
+  en la DB** (columnas BYTEA), así que el dump ya las incluye — no hay carpeta de uploads. El
+  admin conecta su Drive por **OAuth desde la UI** (botón en Configuración → Respaldos): el
+  callback (`GET /configuracion/backup/oauth/callback`, SIN sesión, validado por un `state`
+  firmado) guarda el refresh token en la tabla singleton `backup_config`; el *cliente* OAuth de
+  la app va por entorno (`GDRIVE_CLIENT_ID/SECRET`, `BACKUP_OAUTH_REDIRECT_URI`, `FRONTEND_URL`).
+  Sin Celery: el respaldo diario lo dispara un **task asyncio in-process** lanzado en el
+  `lifespan` (catch-up por hora UTC, robusto a reinicios). También hay descarga manual
+  (`GET /configuracion/backup/descargar`). **Ojo prod**: el `Dockerfile` de producción ahora
+  instala `postgresql-client` (pg_dump); sin eso el backup da 501.
 - **Tailwind v4**: usar `4.1.12` (el `4.0.0` exacto tiene un bug de compilación). Config por
   `@tailwindcss/vite` + `@theme` en `index.css` (color de acento `--color-unla`, bordó UNLa).
 - **`db_migrate.py`** necesita `PYTHONPATH=/app` (corre como script suelto; ya está en el

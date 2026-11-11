@@ -23,7 +23,17 @@ async def lifespan(app: FastAPI):
     if settings.ENV == "development" or settings.RUN_SEED_ON_STARTUP:
         from app.seed import bootstrap_dev
         bootstrap_dev()
-    yield
+
+    # Respaldo diario a Google Drive (task in-process; no usamos Celery). Ver
+    # modules/configuracion/scheduler.py.
+    from app.modules.configuracion import scheduler
+    tasks: list = []
+    scheduler.iniciar(tasks)
+    try:
+        yield
+    finally:
+        for t in tasks:
+            t.cancel()
 
 
 _ES_DEV = settings.ENV == "development"

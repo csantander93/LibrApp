@@ -17,3 +17,5 @@ python-dotenv==1.0.1
 openpyxl==3.1.5
 # Conversión de imágenes a WEBP al subir (optimiza el espacio en disco).
 Pillow==11.0.0
+# Cliente HTTP para la API de Google Drive (respaldo a Drive, configuracion/backup.py).
+httpx==0.28.1

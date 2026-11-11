@@ -233,6 +233,20 @@ export interface Configuracion {
   isbn_obligatorio: boolean;
 }
 
+/** Estado del respaldo a Google Drive (Configuración → Respaldos). */
+export interface BackupEstado {
+  conectado: boolean;
+  oauth_configurado: boolean;
+  drive_cuenta_email: string | null;
+  habilitado: boolean;
+  hora_utc: number;
+  retencion: number;
+  ultimo_backup_at: string | null;
+  ultimo_estado: string | null;
+  ultimo_error: string | null;
+  ultimo_nombre: string | null;
+}
+
 /** Respuesta paginada genérica del backend (Page[T]). */
 export interface Page<T> {
   items: T[];

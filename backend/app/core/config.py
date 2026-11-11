@@ -32,6 +32,24 @@ class Settings(BaseSettings):
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "Admin1234!"
 
+    # ── Respaldo a Google Drive (módulo configuracion/backup.py) ──
+    # Cliente OAuth "Aplicación web" de la app (lo crea el dev una vez en Google
+    # Cloud Console, scope drive.file). El refresh token del usuario NO va acá:
+    # lo setea el flujo OAuth desde la UI y vive en la tabla backup_config.
+    GDRIVE_CLIENT_ID: str = ""
+    GDRIVE_CLIENT_SECRET: str = ""
+    # Callback del OAuth. DEBE coincidir con el redirect URI registrado en Google.
+    BACKUP_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/v1/configuracion/backup/oauth/callback"
+    # A dónde vuelve el navegador tras el callback. Vacío = redirect relativo
+    # (prod, SPA same-origin). En dev el front corre en otro puerto (5175).
+    FRONTEND_URL: str = ""
+
+    @property
+    def gdrive_configurado(self) -> bool:
+        """True si el cliente OAuth de la app está cargado (sin esto no se puede
+        iniciar la conexión con Drive)."""
+        return bool(self.GDRIVE_CLIENT_ID and self.GDRIVE_CLIENT_SECRET)
+
     @property
     def cors_origins_list(self) -> list[str]:
         """CORS_ORIGINS ("a,b,c" o "*") como lista, sin espacios ni vacíos."""

@@ -16,6 +16,12 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
 
+# postgresql-client: provee pg_dump para el respaldo de la base a Drive y la
+# descarga manual (modules/configuracion/backup.py). Dev ya lo trae en Dockerfile.dev.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
