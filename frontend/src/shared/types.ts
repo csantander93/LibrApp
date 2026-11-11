@@ -210,6 +210,24 @@ export interface ImportResultado {
   columnas_detectadas: Record<string, string>;
 }
 
+/** Resultado por archivo de la carga masiva de portadas. */
+export interface ImportImagenItem {
+  archivo: string;
+  estado: "asignada" | "reemplazada" | "sin_match" | "error";
+  libro_titulo: string | null;
+  motivo: string | null;
+}
+
+export interface ImportImagenesResultado {
+  dry_run: boolean;
+  total_archivos: number;
+  asignadas: number;
+  reemplazadas: number;
+  sin_match: number;
+  errores: number;
+  items: ImportImagenItem[];
+}
+
 /** Ajustes generales de la app (editables en /admin/configuracion). */
 export interface Configuracion {
   isbn_obligatorio: boolean;

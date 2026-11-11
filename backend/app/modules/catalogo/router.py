@@ -17,6 +17,7 @@ from app.modules.catalogo.schemas import (
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
     LibroImagenResponse, EstanteImagenResponse,
     CampoLibroResponse, CampoLibroCreate, CampoLibroUpdate,
+    ImportImagenesResultado,
 )
 
 # Lectura: pública (RF-07). Escritura (ABM): protegida por permiso de sección (RN-05).
@@ -527,6 +528,28 @@ async def importar_libros(
             f"Importó '{archivo.filename or 'archivo'}': "
             f"{resultado.creados} creado(s), {resultado.actualizados} actualizado(s), "
             f"{resultado.sin_ubicar} sin ubicar",
+            modulo="Importación", accion="Importación",
+        )
+    return resultado
+
+
+@router.post("/libros/importar-imagenes", response_model=ImportImagenesResultado)
+async def importar_portadas(
+    archivos: list[UploadFile] = File(...),
+    dry_run: bool = Query(True, description="True = solo previsualiza (no persiste)."),
+    db: Session = Depends(get_db),
+    audit: AuditContext = AUDIT_IMP,
+):
+    """Carga masiva de portadas: cada imagen se matchea con un libro por su nombre
+    de archivo (ISBN o id del libro) y pasa a ser la portada. Con dry_run=true
+    devuelve el reporte de lo que se haría sin guardar (preview)."""
+    items = [(a.filename or "", a.content_type or "", await a.read()) for a in archivos]
+    resultado = service.importar_portadas(db, items, dry_run=dry_run)
+    if not resultado.dry_run:
+        audit.registrar_accion(
+            f"Importó portadas: {resultado.asignadas} asignada(s), "
+            f"{resultado.reemplazadas} reemplazada(s), {resultado.sin_match} sin coincidencia, "
+            f"{resultado.errores} con error",
             modulo="Importación", accion="Importación",
         )
     return resultado

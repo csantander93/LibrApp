@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, List, LayoutList, LayoutGrid, SlidersHorizontal, Upload, Bomb, Filter, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Loader2, MapPinOff, ArrowUp, ArrowDown, ArrowUpDown, ImageOff, ImagePlus, List, LayoutList, LayoutGrid, SlidersHorizontal, Upload, Bomb, Filter, X } from "lucide-react";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
 import { Button } from "@/shared/components/ui/Button";
@@ -14,6 +14,7 @@ import { LibroFormModal } from "./LibroFormModal";
 import { LibroDetalleModal } from "./LibroDetalleModal";
 import { CamposLibroManager } from "./CamposLibroManager";
 import { ImportarModal } from "./ImportarModal";
+import { ImportarImagenesModal } from "./ImportarImagenesModal";
 import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
 
 /** Columnas ordenables del catálogo. */
@@ -84,6 +85,7 @@ export function CatalogoPage() {
   const [libroDetalle, setLibroDetalle] = useState<Libro | null>(null);
   const [camposAbierto, setCamposAbierto] = useState(false);
   const [importarAbierto, setImportarAbierto] = useState(false);
+  const [importarImagenesAbierto, setImportarImagenesAbierto] = useState(false);
   const puedeEliminar = tienePermiso("eliminar.ejecutar");
   const puedeGestionar = tienePermiso("catalogo.gestionar");
   // La selección múltiple sirve para dos acciones: asignar categoría (gestionar) y
@@ -340,6 +342,11 @@ export function CatalogoPage() {
           {tienePermiso("importar.ejecutar") && (
             <Button variant="outline" onClick={() => setImportarAbierto(true)}>
               <Upload className="h-4 w-4" /> Importar
+            </Button>
+          )}
+          {tienePermiso("importar.ejecutar") && (
+            <Button variant="outline" onClick={() => setImportarImagenesAbierto(true)}>
+              <ImagePlus className="h-4 w-4" /> Importar portadas
             </Button>
           )}
           <Button variant="outline" onClick={() => setCamposAbierto(true)}>
@@ -751,6 +758,7 @@ export function CatalogoPage() {
       <CamposLibroManager abierto={camposAbierto} onClose={() => setCamposAbierto(false)} />
 
       <ImportarModal abierto={importarAbierto} onClose={() => setImportarAbierto(false)} />
+      <ImportarImagenesModal abierto={importarImagenesAbierto} onClose={() => setImportarImagenesAbierto(false)} />
     </div>
   );
 }

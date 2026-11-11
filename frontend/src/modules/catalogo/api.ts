@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 import type {
-  Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado,
+  Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado, ImportImagenesResultado,
   Anotacion, AnotacionTipo, LibroImagen, EstanteImagen, CampoLibro, CampoLibroInput, TexturaPiso,
 } from "@/shared/types";
 
@@ -384,6 +384,20 @@ export async function importarLibros(archivo: File, dryRun: boolean): Promise<Im
   form.append("archivo", archivo);
   const { data } = await api.post<ImportResultado>(
     `/catalogo/libros/importar?dry_run=${dryRun}`,
+    form,
+  );
+  return data;
+}
+
+/** Carga masiva de portadas: cada imagen se matchea con un libro por su nombre
+ * de archivo (ISBN o id del libro). dryRun=true devuelve el preview sin guardar. */
+export async function importarPortadas(
+  archivos: File[], dryRun: boolean,
+): Promise<ImportImagenesResultado> {
+  const form = new FormData();
+  archivos.forEach((f) => form.append("archivos", f));
+  const { data } = await api.post<ImportImagenesResultado>(
+    `/catalogo/libros/importar-imagenes?dry_run=${dryRun}`,
     form,
   );
   return data;

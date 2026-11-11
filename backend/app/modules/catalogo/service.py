@@ -18,6 +18,7 @@ from app.modules.catalogo.schemas import (
     NivelCreate, NivelUpdate,
     AnotacionResponse, AnotacionCreate,
     CampoLibroCreate, CampoLibroUpdate,
+    ImportImagenItem, ImportImagenesResultado,
 )
 from app.modules.configuracion.service import obtener_configuracion
 from app.shared.exceptions import NotFoundError, ConflictError, ValidationError
@@ -524,6 +525,141 @@ def hacer_principal_imagen(db: Session, imagen_id: uuid.UUID) -> LibroImagen:
     db.commit()
     db.refresh(img)
     return img
+
+
+# ─── Importación masiva de portadas (RF-05 análogo) ───────────────────────────
+#
+# El bibliotecario sube muchas imágenes de una; cada archivo se matchea con un
+# libro por su NOMBRE: el nombre del archivo (sin extensión) debe ser el ISBN del
+# libro o, para los libros sin ISBN, su identificador interno (UUID). La imagen
+# matcheada pasa a ser la PORTADA (orden 0): si el libro ya tenía portada se le
+# reemplaza el contenido en su lugar (la galería no crece ni se desordena); si no
+# tenía imágenes, se crea la portada. Tiene modo dry_run (preview) como el
+# importador de libros.
+
+def _nombre_sin_extension(filename: str) -> str:
+    """Devuelve el nombre del archivo sin ruta ni extensión, ya recortado."""
+    base = filename.replace("\\", "/").rsplit("/", 1)[-1]
+    if "." in base:
+        base = base.rsplit(".", 1)[0]
+    return base.strip()
+
+
+def _norm_isbn(valor: str) -> str:
+    """Normaliza un ISBN dejando solo dígitos y la 'X' de control (saca guiones,
+    espacios, etc.) para que '978-84-376-0494-7' matchee con '9788437604947'."""
+    return re.sub(r"[^0-9X]", "", valor.upper())
+
+
+def _motivo_imagen_invalida(content_type: str, contenido: bytes) -> str | None:
+    """Mismas reglas que `agregar_imagen`; devuelve el motivo si no es válida."""
+    if not contenido:
+        return "El archivo está vacío"
+    if content_type not in CONTENT_TYPES_IMAGEN:
+        return "Formato no admitido (usá JPG, PNG, WEBP, GIF o AVIF)"
+    if len(contenido) > MAX_IMAGEN_BYTES:
+        return "La imagen supera el tamaño máximo (5 MB)"
+    return None
+
+
+def _set_portada(db: Session, libro_id: uuid.UUID, contenido_webp: bytes) -> str:
+    """Deja `contenido_webp` como portada (orden 0) del libro. Si ya había una
+    imagen en orden 0 le reemplaza el binario (no crece la galería); si no, la
+    crea. Devuelve 'reemplazada' o 'asignada'."""
+    actual = (
+        db.query(LibroImagen)
+        .filter(LibroImagen.libro_id == libro_id, LibroImagen.orden == 0)
+        .first()
+    )
+    if actual is not None:
+        actual.contenido = contenido_webp
+        actual.content_type = WEBP_CONTENT_TYPE
+        return "reemplazada"
+    db.add(LibroImagen(
+        libro_id=libro_id, orden=0, content_type=WEBP_CONTENT_TYPE, contenido=contenido_webp,
+    ))
+    return "asignada"
+
+
+def importar_portadas(
+    db: Session, archivos: list[tuple[str, str, bytes]], dry_run: bool,
+) -> ImportImagenesResultado:
+    """Carga masiva de portadas. `archivos` es [(nombre, content_type, bytes)].
+    Matchea cada archivo con un libro por ISBN o por UUID según su nombre y, si
+    no es dry_run, guarda la imagen como portada (ver `_set_portada`)."""
+    libros = db.query(Libro).all()
+    por_isbn: dict[str, Libro] = {}
+    for lb in libros:
+        if lb.isbn:
+            clave = _norm_isbn(lb.isbn)
+            if clave:
+                por_isbn.setdefault(clave, lb)
+    por_id = {str(lb.id): lb for lb in libros}
+
+    items: list[ImportImagenItem] = []
+    asignadas = reemplazadas = sin_match = errores = 0
+    # Un mismo libro no puede recibir dos archivos en la misma corrida.
+    vistos: set[uuid.UUID] = set()
+
+    for filename, content_type, contenido in archivos:
+        nombre = _nombre_sin_extension(filename)
+        libro = por_id.get(nombre.lower())
+        if libro is None:
+            clave_isbn = _norm_isbn(nombre)
+            if clave_isbn:
+                libro = por_isbn.get(clave_isbn)
+        if libro is None:
+            sin_match += 1
+            items.append(ImportImagenItem(
+                archivo=filename, estado="sin_match",
+                motivo="No se encontró un libro con ese ISBN o código",
+            ))
+            continue
+
+        motivo = _motivo_imagen_invalida(content_type, contenido)
+        if motivo is None and libro.id in vistos:
+            motivo = "Hay más de un archivo para este mismo libro en la selección"
+        if motivo is not None:
+            errores += 1
+            items.append(ImportImagenItem(
+                archivo=filename, estado="error", libro_titulo=libro.titulo, motivo=motivo,
+            ))
+            continue
+
+        vistos.add(libro.id)
+        if dry_run:
+            ya_tiene = (
+                db.query(LibroImagen.id)
+                .filter(LibroImagen.libro_id == libro.id, LibroImagen.orden == 0)
+                .first()
+                is not None
+            )
+            estado = "reemplazada" if ya_tiene else "asignada"
+        else:
+            try:
+                estado = _set_portada(db, libro.id, _a_webp(contenido))
+            except ValidationError as exc:
+                errores += 1
+                items.append(ImportImagenItem(
+                    archivo=filename, estado="error", libro_titulo=libro.titulo, motivo=str(exc.detail),
+                ))
+                vistos.discard(libro.id)
+                continue
+
+        if estado == "reemplazada":
+            reemplazadas += 1
+        else:
+            asignadas += 1
+        items.append(ImportImagenItem(archivo=filename, estado=estado, libro_titulo=libro.titulo))
+
+    if not dry_run:
+        db.commit()
+
+    return ImportImagenesResultado(
+        dry_run=dry_run, total_archivos=len(archivos),
+        asignadas=asignadas, reemplazadas=reemplazadas, sin_match=sin_match, errores=errores,
+        items=items,
+    )
 
 
 # ─── Fotos de referencia del estante ──────────────────────────────────────────
