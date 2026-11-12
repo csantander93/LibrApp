@@ -142,8 +142,13 @@ def listar_libros(
     precio_max=None,
     autor: str | None = None,
     editorial: str | None = None,
+    incluir_internos: bool = True,
 ) -> list[LibroResponse]:
-    """Listado con filtros (RF-06). Búsqueda case-insensitive por título/autor/ISBN (CU-01)."""
+    """Listado con filtros (RF-06). Búsqueda case-insensitive por título/autor/ISBN (CU-01).
+
+    `incluir_internos=False` (petición pública, sin sesión) omite de datos_extra los
+    valores de los campos marcados como internos (visible_publico=False): esos datos
+    del negocio no viajan al navegador del público (RF-07/RF-08)."""
     query = db.query(Libro).options(
         selectinload(Libro.estante), selectinload(Libro.coleccion), selectinload(Libro.nivel),
         selectinload(Libro.imagenes),
@@ -174,7 +179,17 @@ def listar_libros(
         query = query.filter(Libro.editorial.ilike(f"%{editorial.strip()}%"))
     # Orden manual primero (reordenamiento de lomos en el mapa), título como
     # desempate estable.
-    return [_to_libro_response(lb) for lb in query.order_by(Libro.orden, Libro.titulo).all()]
+    libros = [_to_libro_response(lb) for lb in query.order_by(Libro.orden, Libro.titulo).all()]
+    if not incluir_internos:
+        internos = {
+            c.codigo for c in db.query(CampoLibro.codigo).filter(
+                CampoLibro.visible_publico.is_(False)
+            ).all()
+        }
+        if internos:
+            for lb in libros:
+                lb.datos_extra = {k: v for k, v in lb.datos_extra.items() if k not in internos}
+    return libros
 
 
 def actualizar_orden_libros(db: Session, items) -> int:
@@ -1259,6 +1274,7 @@ def crear_campo(db: Session, data: CampoLibroCreate) -> CampoLibro:
         opciones=data.opciones,
         requerido=data.requerido,
         orden=data.orden,
+        visible_publico=data.visible_publico,
     )
     db.add(c)
     db.commit()

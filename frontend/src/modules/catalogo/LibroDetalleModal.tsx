@@ -1,4 +1,4 @@
-import { Pencil, MapPinOff } from "lucide-react";
+import { Pencil, MapPinOff, EyeOff } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Button } from "@/shared/components/ui/Button";
@@ -23,7 +23,7 @@ function formatearPrecio(precio: string | null): string {
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS" });
 }
 
-function Campo({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
+function Campo({ etiqueta, children }: { etiqueta: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
       <dt className="text-xs uppercase tracking-wide text-slate-400">{etiqueta}</dt>
@@ -43,9 +43,14 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
   const { data: campos = [] } = useQuery({ queryKey: ["campos-libro"], queryFn: listarCampos });
   if (!libro) return null;
 
+  // Vista pública = sin botón "Editar" (no hay sesión admin): los campos internos
+  // no se muestran (el backend ya omite su valor; acá se refuerza en la UI).
+  const esPublico = !onEditar;
+
   // Campos personalizados con valor cargado (respeta el orden de las definiciones).
   const datosExtra = libro.datos_extra ?? {};
   const camposConValor = campos.filter((c) => {
+    if (esPublico && !c.visible_publico) return false;
     const v = datosExtra[c.codigo];
     return v !== null && v !== undefined && v !== "";
   });
@@ -89,9 +94,20 @@ export function LibroDetalleModal({ libro, onClose, onEditar }: Props) {
           <span className="tabular-nums">{formatearPrecio(libro.precio)}</span>
         </Campo>
 
-        {/* Campos personalizados (dinámicos) con valor. */}
+        {/* Campos personalizados (dinámicos) con valor. En el panel admin, los
+            campos internos llevan una marca (al público ya se le ocultan). */}
         {camposConValor.map((campo) => (
-          <Campo key={campo.id} etiqueta={campo.etiqueta}>
+          <Campo
+            key={campo.id}
+            etiqueta={
+              <span className="inline-flex items-center gap-1">
+                {campo.etiqueta}
+                {!campo.visible_publico && (
+                  <EyeOff className="h-3 w-3 text-amber-500" aria-label="Campo interno (no visible al público)" />
+                )}
+              </span>
+            }
+          >
             {formatearDato(campo, datosExtra[campo.codigo])}
           </Campo>
         ))}

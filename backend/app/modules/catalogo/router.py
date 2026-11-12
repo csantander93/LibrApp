@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query, Response, statu
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import audit_ctx, AuditContext, require_permiso
+from app.core.deps import audit_ctx, AuditContext, require_permiso, get_optional_user
 from app.modules.auth import permisos as P
 from app.modules.auth.models import Usuario
 from app.modules.catalogo import service, importer
@@ -57,11 +57,14 @@ def listar_libros(
     autor: str | None = None,
     editorial: str | None = None,
     db: Session = Depends(get_db),
+    user: Usuario | None = Depends(get_optional_user),
 ):
+    # Público (sin sesión): se omiten los valores de campos internos (RF-07/RF-08).
     return service.listar_libros(
         db, q=q, coleccion_id=coleccion_id, estante_id=estante_id,
         nivel_id=nivel_id, sin_ubicar=sin_ubicar,
         precio_min=precio_min, precio_max=precio_max, autor=autor, editorial=editorial,
+        incluir_internos=user is not None,
     )
 
 

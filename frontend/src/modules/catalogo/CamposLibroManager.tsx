@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Pencil, Trash2, Plus, X, GripVertical } from "lucide-react";
+import { Loader2, Pencil, Trash2, Plus, X, GripVertical, EyeOff } from "lucide-react";
 import { Modal } from "@/shared/components/ui/Modal";
 import { Input } from "@/shared/components/ui/Input";
 import { Select } from "@/shared/components/ui/Select";
@@ -37,9 +37,16 @@ interface FormState {
   tipo: TipoCampo;
   opcionesTexto: string; // una opción por línea (se parsea al guardar)
   requerido: boolean;
+  visiblePublico: boolean;
 }
 
-const FORM_VACIO: FormState = { etiqueta: "", tipo: "texto", opcionesTexto: "", requerido: false };
+const FORM_VACIO: FormState = {
+  etiqueta: "",
+  tipo: "texto",
+  opcionesTexto: "",
+  requerido: false,
+  visiblePublico: true,
+};
 
 export function CamposLibroManager({ abierto, onClose }: Props) {
   const qc = useQueryClient();
@@ -74,6 +81,7 @@ export function CamposLibroManager({ abierto, onClose }: Props) {
       tipo: campo.tipo,
       opcionesTexto: (campo.opciones ?? []).join("\n"),
       requerido: campo.requerido,
+      visiblePublico: campo.visible_publico,
     });
     setError(null);
   }
@@ -89,6 +97,7 @@ export function CamposLibroManager({ abierto, onClose }: Props) {
         tipo: form.tipo,
         opciones,
         requerido: form.requerido,
+        visible_publico: form.visiblePublico,
       };
       return editId ? actualizarCampo(editId, payload) : crearCampo(payload);
     },
@@ -178,9 +187,19 @@ export function CamposLibroManager({ abierto, onClose }: Props) {
             >
               <GripVertical className="h-4 w-4 shrink-0 text-stone-300" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-stone-800">
-                  {campo.etiqueta}
-                  {campo.requerido && <span className="ml-1 text-unla" title="Obligatorio">*</span>}
+                <p className="flex items-center gap-1.5 truncate text-sm font-medium text-stone-800">
+                  <span className="truncate">
+                    {campo.etiqueta}
+                    {campo.requerido && <span className="ml-1 text-unla" title="Obligatorio">*</span>}
+                  </span>
+                  {!campo.visible_publico && (
+                    <span
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                      title="Campo interno: no se muestra en la consulta pública"
+                    >
+                      <EyeOff className="h-3 w-3" /> Interno
+                    </span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-stone-400">
                   {TIPO_LABEL[campo.tipo]}
@@ -282,6 +301,22 @@ export function CamposLibroManager({ abierto, onClose }: Props) {
             onChange={(e) => set("requerido", e.target.checked)}
           />
           Obligatorio al cargar un libro
+        </label>
+
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={form.visiblePublico}
+            onChange={(e) => set("visiblePublico", e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Visible en la consulta pública
+            <span className="mt-0.5 block text-xs text-stone-400">
+              Desmarcá para datos internos del negocio: se cargan y se ven en el panel,
+              pero no se muestran a quien consulta sin iniciar sesión.
+            </span>
+          </span>
         </label>
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

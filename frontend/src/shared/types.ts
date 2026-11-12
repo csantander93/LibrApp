@@ -96,6 +96,8 @@ export interface CampoLibro {
   requerido: boolean;
   orden: number;
   activo: boolean;
+  /** Visible en la autoconsulta pública. False = campo interno (solo admin). */
+  visible_publico: boolean;
 }
 
 /** Payload de alta/edición de un campo personalizado. */
@@ -106,6 +108,7 @@ export interface CampoLibroInput {
   requerido?: boolean;
   orden?: number;
   activo?: boolean;
+  visible_publico?: boolean;
 }
 
 /** Metadatos de una imagen de libro (el binario se pide por su URL). */

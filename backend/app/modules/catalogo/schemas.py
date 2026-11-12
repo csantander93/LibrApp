@@ -470,6 +470,7 @@ class CampoLibroResponse(BaseModel):
     requerido: bool
     orden: int
     activo: bool
+    visible_publico: bool
 
 
 class CampoLibroCreate(BaseModel):
@@ -478,6 +479,7 @@ class CampoLibroCreate(BaseModel):
     opciones: list[str] | None = None
     requerido: bool = False
     orden: int = 0
+    visible_publico: bool = True
 
     @field_validator("etiqueta")
     @classmethod
@@ -517,6 +519,7 @@ class CampoLibroUpdate(BaseModel):
     requerido: bool | None = None
     orden: int | None = None
     activo: bool | None = None
+    visible_publico: bool | None = None
 
     @field_validator("etiqueta")
     @classmethod

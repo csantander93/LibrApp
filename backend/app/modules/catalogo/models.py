@@ -275,3 +275,9 @@ class CampoLibro(UUIDMixin, TimestampMixin, Base):
     requerido: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     orden: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Visibilidad en la autoconsulta pública (RF-07): True = se muestra al público;
+    # False = campo interno del negocio, solo visible en el panel admin. El valor del
+    # campo interno se omite de la respuesta pública (ver service.listar_libros).
+    visible_publico: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true",
+    )

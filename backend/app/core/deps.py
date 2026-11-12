@@ -41,6 +41,29 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> Usuario | None:
+    """Como get_current_user pero NO exige sesión: devuelve el Usuario si el token
+    es válido, o None si no hay token / es inválido. Para endpoints de lectura
+    pública que ajustan la respuesta según sea admin o público (ej. ocultar campos
+    internos en la autoconsulta)."""
+    if creds is None or not creds.credentials:
+        return None
+    try:
+        payload = decode_access_token(creds.credentials)
+    except JWTError:
+        return None
+    username = payload.get("sub")
+    if not username:
+        return None
+    user = db.query(Usuario).filter(Usuario.username == username).first()
+    if user is None or not user.activo:
+        return None
+    return user
+
+
 def require_permiso(*permisos: str):
     """Fábrica de dependencia: exige que el usuario tenga al menos uno de los
     permisos. Sin permisos, solo exige sesión válida (útil para lecturas)."""
