@@ -151,6 +151,17 @@ class LibroResponse(BaseModel):
     datos_extra: dict = {}
 
 
+class LibroSugerencia(BaseModel):
+    """Sugerencia liviana para el autocompletado del buscador público (CU-01).
+    Solo lo justo para el dropdown; la ficha completa se pide aparte al elegir."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    titulo: str
+    autor: str
+    # Id de la portada (primera imagen) para la miniatura, o None si no tiene.
+    portada_id: uuid.UUID | None = None
+
+
 # ─── Escritura: Libro (RF-04) ─────────────────────────────────────────────────
 
 def _limpiar(v: str | None) -> str | None:

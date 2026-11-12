@@ -284,6 +284,7 @@ def importar(db: Session, contenido: bytes, filename: str, dry_run: bool) -> Imp
                 if extra:
                     # Merge: conserva los valores previos de otros campos dinámicos.
                     existente.datos_extra = {**(existente.datos_extra or {}), **extra}
+                service.reindexar_libro(existente)  # título/autor/editorial pueden haber cambiado
         else:
             creados += 1
             nuevo = Libro(
@@ -296,6 +297,7 @@ def importar(db: Session, contenido: bytes, filename: str, dry_run: bool) -> Imp
                 # Código interno autogenerado (solo en import real, no en dry-run,
                 # para no consumir la secuencia en la previsualización).
                 nuevo.codigo = service.generar_codigo_libro(db)
+                service.reindexar_libro(nuevo)  # documento de búsqueda (incluye el código)
                 db.add(nuevo)
             # Registrar en los índices para no duplicar dentro del mismo archivo.
             if isbn:

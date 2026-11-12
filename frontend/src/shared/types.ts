@@ -81,6 +81,15 @@ export interface Libro {
   datos_extra: Record<string, unknown>;
 }
 
+/** Sugerencia liviana del autocompletado del buscador público (CU-01). */
+export interface LibroSugerencia {
+  id: string;
+  titulo: string;
+  autor: string;
+  /** Id de la portada (primera imagen) para la miniatura, o null si no tiene. */
+  portada_id: string | null;
+}
+
 /** Tipo de dato de un campo personalizado (dinámico) de libro. */
 export type TipoCampo = "texto" | "numero" | "select" | "booleano" | "fecha";
 

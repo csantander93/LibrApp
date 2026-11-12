@@ -17,7 +17,7 @@ from app.modules.catalogo.schemas import (
     AnotacionResponse, AnotacionCreate, AnotacionesUpdate,
     LibroImagenResponse, EstanteImagenResponse,
     CampoLibroResponse, CampoLibroCreate, CampoLibroUpdate,
-    ImportImagenesResultado,
+    ImportImagenesResultado, LibroSugerencia,
 )
 
 # Lectura: pública (RF-07). Escritura (ABM): protegida por permiso de sección (RN-05).
@@ -66,6 +66,17 @@ def listar_libros(
         precio_min=precio_min, precio_max=precio_max, autor=autor, editorial=editorial,
         incluir_internos=user is not None,
     )
+
+
+# Autocompletado del buscador público (CU-01). Declarado ANTES de /libros/{libro_id}
+# para que "sugerencias" no se parsee como UUID.
+@router.get("/libros/sugerencias", response_model=list[LibroSugerencia])
+def sugerir_libros(
+    q: str = Query(..., min_length=1, description="Texto tipeado por el usuario"),
+    limite: int = Query(8, ge=1, le=15),
+    db: Session = Depends(get_db),
+):
+    return service.sugerir_libros(db, q, limite)
 
 
 @router.get("/estantes", response_model=list[EstanteResponse])

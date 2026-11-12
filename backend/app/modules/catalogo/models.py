@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import String, Text, Integer, Numeric, ForeignKey, UniqueConstraint, LargeBinary, Boolean
+from sqlalchemy import String, Text, Integer, Numeric, ForeignKey, UniqueConstraint, LargeBinary, Boolean, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.shared.models import Base, UUIDMixin, TimestampMixin
@@ -180,6 +180,14 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     estante_id nulo = 'Sin ubicar' (RN-07).
     """
     __tablename__ = "libros"
+    __table_args__ = (
+        # Documento de búsqueda inteligente (autoconsulta pública + ABM): GIN trigram
+        # sobre `busqueda` acelera el LIKE '%...%' y el operador de similitud `<%`.
+        Index(
+            "ix_libros_busqueda_trgm", "busqueda",
+            postgresql_using="gin", postgresql_ops={"busqueda": "gin_trgm_ops"},
+        ),
+    )
 
     # Código interno único y legible, autogenerado al dar de alta (formato "L-000123").
     # A diferencia del ISBN (opcional, editorial), SIEMPRE existe y es fijo: sirve como
@@ -194,6 +202,12 @@ class Libro(UUIDMixin, TimestampMixin, Base):
     # Sinopsis/reseña del libro (texto largo libre). Se muestra como panel de lectura
     # en la ficha (admin y vista pública). Nulo = sin sinopsis cargada.
     sinopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Documento de búsqueda materializado y normalizado (minúsculas, sin acentos):
+    # titulo + autor + editorial + isbn + codigo + sinopsis. Lo mantiene el service
+    # (ver `busqueda.construir_texto_busqueda` / `service.reindexar_libro`). Nulo
+    # hasta el primer reindexado; el motor lo trata como vacío.
+    busqueda: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     coleccion_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("colecciones.id", ondelete="SET NULL"), nullable=True,

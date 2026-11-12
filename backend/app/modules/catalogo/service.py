@@ -19,7 +19,9 @@ from app.modules.catalogo.schemas import (
     AnotacionResponse, AnotacionCreate,
     CampoLibroCreate, CampoLibroUpdate,
     ImportImagenItem, ImportImagenesResultado,
+    LibroSugerencia,
 )
+from app.modules.catalogo import busqueda as B
 from app.modules.configuracion.service import obtener_configuracion
 from app.shared.exceptions import NotFoundError, ConflictError, ValidationError
 from app.shared.audit_utils import diff_cambios, describir_cambios
@@ -131,6 +133,49 @@ def _to_libro_response(lb: Libro) -> LibroResponse:
     )
 
 
+def reindexar_libro(lb: Libro) -> None:
+    """Recalcula el documento de búsqueda materializado (`Libro.busqueda`) a partir
+    de los campos actuales del libro. Llamar en toda vía de alta/edición que toque
+    titulo/autor/editorial/isbn/codigo/sinopsis (ABM, importador, seed), antes del
+    commit. No incluye la colección a propósito (ver `busqueda.construir_texto_busqueda`)."""
+    lb.busqueda = B.construir_texto_busqueda(lb)
+
+
+def _aplicar_busqueda(query, q: str):
+    """Aplica el motor de búsqueda inteligente sobre `query` (que ya trae los demás
+    filtros) y lo devuelve filtrado. Niveles, de más estricto a más laxo, cayendo al
+    siguiente solo si el anterior no trae nada (así el fuzzy no ensucia cuando hay
+    match exacto): substring AND → fuzzy AND → OR (cualquier token).
+
+    Requiere que `B.aplicar_umbral(db)` se haya llamado antes (para el operador `<%`)."""
+    tokens = B.tokenizar(q)
+    if not tokens:
+        # Consulta sin tokens útiles (1 carácter): substring normalizado y escapado.
+        sub = B.substring_norm(q, Libro.busqueda)
+        return query.filter(sub) if sub is not None else query
+    # Nivel 1: substring (AND entre tokens) — 100% indexable, barato.
+    nivel1 = query
+    for c in B.condiciones_and(q, Libro.busqueda, fuzzy=False):
+        nivel1 = nivel1.filter(c)
+    if nivel1.count() > 0:
+        return nivel1
+    # Nivel 2: tolerancia a typos (word_similarity).
+    nivel2 = query
+    for c in B.condiciones_and(q, Libro.busqueda, fuzzy=True):
+        nivel2 = nivel2.filter(c)
+    if len(tokens) == 1 or nivel2.count() > 0:
+        return nivel2
+    # Fallback: con 2+ tokens que juntos no matchean, probar OR (cualquier token).
+    for usar_fuzzy in (False, True):
+        oc = B.condicion_or(q, Libro.busqueda, fuzzy=usar_fuzzy)
+        if oc is None:
+            break
+        orq = query.filter(oc)
+        if orq.count() > 0:
+            return orq
+    return nivel2  # vacío, pero consistente
+
+
 def listar_libros(
     db: Session,
     q: str | None = None,
@@ -153,12 +198,9 @@ def listar_libros(
         selectinload(Libro.estante), selectinload(Libro.coleccion), selectinload(Libro.nivel),
         selectinload(Libro.imagenes),
     )
-    if q:
-        like = f"%{q.strip()}%"
-        query = query.filter(
-            Libro.titulo.ilike(like) | Libro.autor.ilike(like)
-            | Libro.isbn.ilike(like) | Libro.codigo.ilike(like)
-        )
+    # Los filtros "duros" (categoría, estante, precio, etc.) se aplican primero para
+    # que el motor de búsqueda decida sus niveles (substring/fuzzy) sobre el conjunto
+    # ya acotado — y así el fuzzy solo entre cuando de verdad no hay coincidencias.
     if coleccion_id:
         query = query.filter(Libro.coleccion_id == coleccion_id)
     if estante_id:
@@ -177,9 +219,18 @@ def listar_libros(
         query = query.filter(Libro.autor.ilike(f"%{autor.strip()}%"))
     if editorial and editorial.strip():
         query = query.filter(Libro.editorial.ilike(f"%{editorial.strip()}%"))
-    # Orden manual primero (reordenamiento de lomos en el mapa), título como
-    # desempate estable.
-    libros = [_to_libro_response(lb) for lb in query.order_by(Libro.orden, Libro.titulo).all()]
+
+    if q and q.strip():
+        # Búsqueda inteligente (acentos / typos / sinónimos): ordena por relevancia.
+        B.aplicar_umbral(db)
+        query = _aplicar_busqueda(query, q)
+        query = query.order_by(B.expresion_ranking(q, Libro.busqueda).desc(), Libro.titulo)
+    else:
+        # Orden manual primero (reordenamiento de lomos en el mapa), título como
+        # desempate estable.
+        query = query.order_by(Libro.orden, Libro.titulo)
+
+    libros = [_to_libro_response(lb) for lb in query.all()]
     if not incluir_internos:
         internos = {
             c.codigo for c in db.query(CampoLibro.codigo).filter(
@@ -190,6 +241,26 @@ def listar_libros(
             for lb in libros:
                 lb.datos_extra = {k: v for k, v in lb.datos_extra.items() if k not in internos}
     return libros
+
+
+def sugerir_libros(db: Session, q: str, limite: int = 8) -> list[LibroSugerencia]:
+    """Autocompletado de la barra de búsqueda pública: top-N libros por relevancia
+    para el texto tipeado (mismo motor que `listar_libros`: substring → fuzzy). Trae
+    solo lo justo para el dropdown (título, autor, id de portada)."""
+    if not q or not q.strip():
+        return []
+    B.aplicar_umbral(db)
+    query = db.query(Libro).options(selectinload(Libro.imagenes))
+    query = _aplicar_busqueda(query, q)
+    query = query.order_by(B.expresion_ranking(q, Libro.busqueda).desc(), Libro.titulo)
+    libros = query.limit(limite).all()
+    return [
+        LibroSugerencia(
+            id=lb.id, titulo=lb.titulo, autor=lb.autor,
+            portada_id=lb.imagenes[0].id if lb.imagenes else None,
+        )
+        for lb in libros
+    ]
 
 
 def actualizar_orden_libros(db: Session, items) -> int:
@@ -333,6 +404,7 @@ def crear_libro(db: Session, data: LibroCreate) -> LibroResponse:
     payload["datos_extra"] = _validar_datos_extra(db, payload.get("datos_extra"))
     lb = Libro(**payload)
     lb.codigo = generar_codigo_libro(db)
+    reindexar_libro(lb)
     db.add(lb)
     db.commit()
     db.refresh(lb)
@@ -359,6 +431,7 @@ def actualizar_libro(db: Session, libro_id: uuid.UUID, data: LibroUpdate) -> Lib
     desc = describir_cambios(diff_cambios(lb, {k: v for k, v in cambios.items() if k != "datos_extra"}))
     for campo, valor in cambios.items():
         setattr(lb, campo, valor)
+    reindexar_libro(lb)  # titulo/autor/editorial/isbn/sinopsis pueden haber cambiado
     db.commit()
     db.refresh(lb)
     return _stash_audit(_to_libro_response(lb), desc)

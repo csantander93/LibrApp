@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 import type {
-  Libro, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado, ImportImagenesResultado,
+  Libro, LibroSugerencia, Coleccion, Zona, Estante, Nivel, LibroInput, ImportResultado, ImportImagenesResultado,
   Anotacion, AnotacionTipo, LibroImagen, EstanteImagen, CampoLibro, CampoLibroInput, TexturaPiso,
 } from "@/shared/types";
 
@@ -30,6 +30,15 @@ export async function listarLibros(filtros: LibroFiltros = {}): Promise<Libro[]>
   if (filtros.autor) params.autor = filtros.autor;
   if (filtros.editorial) params.editorial = filtros.editorial;
   const { data } = await api.get<Libro[]>("/catalogo/libros", { params });
+  return data;
+}
+
+/** Autocompletado del buscador público: top-N libros por relevancia para `q`
+ *  (acentos/typos/sinónimos tolerados por el backend). */
+export async function sugerirLibros(q: string, limite = 8): Promise<LibroSugerencia[]> {
+  const { data } = await api.get<LibroSugerencia[]>("/catalogo/libros/sugerencias", {
+    params: { q, limite },
+  });
   return data;
 }
 

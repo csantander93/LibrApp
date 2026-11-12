@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -8,8 +8,9 @@ import {
 import { Select } from "@/shared/components/ui/Select";
 import { Modal } from "@/shared/components/ui/Modal";
 import { TablePagination, PAGE_SIZE_DEFAULT } from "@/shared/components/ui/TablePagination";
+import { useDebounce } from "@/shared/hooks/useDebounce";
 import {
-  listarLibros, listarEstantes, listarZonas, listarAnotaciones, listarColecciones,
+  listarLibros, sugerirLibros, listarEstantes, listarZonas, listarAnotaciones, listarColecciones,
   urlImagenLibro, urlFotoEstante,
 } from "@/modules/catalogo/api";
 import { ImagenCarrusel } from "@/modules/catalogo/ImagenCarrusel";
@@ -139,6 +140,10 @@ export function PublicSearchPage() {
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const [libroDetalle, setLibroDetalle] = useState<Libro | null>(null);
 
+  // ── Autocompletado del buscador ──────────────────────────────────────────────
+  const [focoBusqueda, setFocoBusqueda] = useState(false);
+  const buscadorRef = useRef<HTMLDivElement>(null);
+
   // ── Estado del mapa ──────────────────────────────────────────────────────────
   const [estantePanel, setEstantePanel] = useState<Estante | null>(null);
   const [libroMapa, setLibroMapa] = useState<Libro | null>(null);
@@ -158,6 +163,27 @@ export function PublicSearchPage() {
     queryKey: ["public-libros", filtros],
     queryFn: () => listarLibros(filtros),
   });
+  // Sugerencias (autocompletado): se piden con el término "debounceado" para no
+  // golpear el backend en cada tecla, y solo con el buscador enfocado.
+  const qSugerencias = useDebounce(q.trim(), 250);
+  const { data: sugerencias = [] } = useQuery({
+    queryKey: ["sugerencias", qSugerencias],
+    queryFn: () => sugerirLibros(qSugerencias),
+    enabled: focoBusqueda && qSugerencias.length >= 2,
+  });
+  const mostrarSugerencias = focoBusqueda && qSugerencias.length >= 2 && sugerencias.length > 0;
+
+  // Cerrar el dropdown al hacer clic fuera del buscador.
+  useEffect(() => {
+    function alClickear(e: MouseEvent) {
+      if (buscadorRef.current && !buscadorRef.current.contains(e.target as Node)) {
+        setFocoBusqueda(false);
+      }
+    }
+    document.addEventListener("mousedown", alClickear);
+    return () => document.removeEventListener("mousedown", alClickear);
+  }, []);
+
   const { data: colecciones = [] } = useQuery({ queryKey: ["colecciones"], queryFn: listarColecciones });
   const { data: estantes = [] } = useQuery({ queryKey: ["estantes"], queryFn: listarEstantes });
   const { data: zonas = [] } = useQuery({ queryKey: ["zonas"], queryFn: listarZonas });
@@ -236,16 +262,59 @@ export function PublicSearchPage() {
           </p>
         </header>
 
-        {/* Buscador (compartido por ambas solapas) */}
-        <div className="mb-4 flex items-center gap-2 rounded-2xl border border-stone-200 bg-white p-2 shadow-lg shadow-stone-900/5 ring-1 ring-black/[0.02] focus-within:border-unla/40 focus-within:ring-2 focus-within:ring-unla/20">
-          <Search className="ml-2 h-5 w-5 shrink-0 text-stone-400" />
-          <input
-            value={q}
-            onChange={(e) => { setQ(e.target.value); setPagina(1); }}
-            placeholder="Buscar por título, autor, editorial o ISBN…"
-            autoFocus
-            className="min-w-0 flex-1 bg-transparent px-1 py-2 text-[15px] text-stone-900 placeholder:text-stone-400 focus:outline-none"
-          />
+        {/* Buscador (compartido por ambas solapas) + autocompletado */}
+        <div ref={buscadorRef} className="relative mb-4">
+          <div className="flex items-center gap-2 rounded-2xl border border-stone-200 bg-white p-2 shadow-lg shadow-stone-900/5 ring-1 ring-black/[0.02] focus-within:border-unla/40 focus-within:ring-2 focus-within:ring-unla/20">
+            <Search className="ml-2 h-5 w-5 shrink-0 text-stone-400" />
+            <input
+              value={q}
+              onChange={(e) => { setQ(e.target.value); setPagina(1); }}
+              onFocus={() => setFocoBusqueda(true)}
+              onKeyDown={(e) => { if (e.key === "Escape") setFocoBusqueda(false); }}
+              placeholder="Buscá aunque no sepas el título exacto: toleramos acentos y errores…"
+              autoFocus
+              className="min-w-0 flex-1 bg-transparent px-1 py-2 text-[15px] text-stone-900 placeholder:text-stone-400 focus:outline-none"
+            />
+          </div>
+
+          {/* Dropdown de sugerencias (clic completa la búsqueda) */}
+          {mostrarSugerencias && (
+            <ul className="absolute z-20 mt-1.5 max-h-80 w-full overflow-auto rounded-xl border border-stone-200 bg-white py-1 shadow-xl shadow-stone-900/10">
+              {sugerencias.map((s) => (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    // onMouseDown (no onClick): corre antes del blur del input, así el
+                    // clic no se pierde al cerrarse el dropdown.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setQ(s.titulo);
+                      setPagina(1);
+                      setSolapa("catalogo");
+                      setFocoBusqueda(false);
+                    }}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-stone-50"
+                  >
+                    {s.portada_id ? (
+                      <img
+                        src={urlImagenLibro(s.portada_id)}
+                        alt=""
+                        className="h-11 w-8 shrink-0 rounded object-cover ring-1 ring-black/5"
+                      />
+                    ) : (
+                      <div className="flex h-11 w-8 shrink-0 items-center justify-center rounded bg-slate-100 text-slate-300">
+                        <ImageOff className="h-4 w-4" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-stone-900">{s.titulo}</p>
+                      <p className="truncate text-xs text-stone-500">{s.autor}</p>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {/* Solapas: Catálogo (por defecto) · Mapa — en Mapa, a la derecha el título y el filtro de plantas */}

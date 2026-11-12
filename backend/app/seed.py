@@ -19,7 +19,7 @@ from app.core.security import hash_password
 from app.modules.auth.models import Usuario, Rol
 from app.modules.auth.permisos import WILDCARD
 from app.modules.catalogo.models import Zona, Coleccion, Estante, Libro, AnotacionMapa, Nivel
-from app.modules.catalogo.service import generar_codigo_libro
+from app.modules.catalogo.service import generar_codigo_libro, reindexar_libro
 
 settings = get_settings()
 
@@ -160,14 +160,16 @@ def _agregar_libro(db, isbn, titulo, autor, editorial, precio, coleccion, estant
         return False
     if db.query(Libro).filter(Libro.titulo == titulo, Libro.editorial == editorial).first():
         return False
-    db.add(Libro(
+    libro = Libro(
         codigo=generar_codigo_libro(db),
         isbn=isbn, titulo=titulo, autor=autor, editorial=editorial,
         precio=Decimal(str(precio)) if precio else None,
         coleccion_id=coleccion.id if coleccion else None,
         estante_id=estante.id if estante else None,
         nivel_id=nivel.id if nivel else None,
-    ))
+    )
+    reindexar_libro(libro)  # documento de búsqueda inteligente
+    db.add(libro)
     db.flush()  # hace visible el INSERT para los checks siguientes dentro de la misma transacción
     return True
 
